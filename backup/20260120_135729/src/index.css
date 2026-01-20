@@ -20,9 +20,23 @@ body {
   transition: all 0.2s ease;
 }
 
-/* Card Agrupado (Indicador visual de pilha) */
+/* Card Agrupado (Efeito de Pilha) */
 .grouped-card {
-  border-left: 4px solid #3B82F6; /* Azul indicando grupo */
+  position: relative;
+  z-index: 10;
+}
+.grouped-card::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  bottom: -4px;
+  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.04);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+  z-index: -1;
 }
 
 .fab-main {

@@ -10,7 +10,7 @@ APP_NAME = "MotoristaPro-Rota"
 
 files_content = {}
 
-# 1. CSS (Estilos para Agrupamento e Métricas)
+# 1. CSS (Mantido estilo limpo V12)
 files_content['src/index.css'] = '''@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -33,23 +33,9 @@ body {
   transition: all 0.2s ease;
 }
 
-/* Card Agrupado (Efeito de Pilha) */
+/* Card Agrupado (Indicador visual de pilha) */
 .grouped-card {
-  position: relative;
-  z-index: 10;
-}
-.grouped-card::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  right: 4px;
-  bottom: -4px;
-  background: white;
-  border-radius: 16px;
-  border: 1px solid rgba(0,0,0,0.04);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.03);
-  z-index: -1;
+  border-left: 4px solid #3B82F6; /* Azul indicando grupo */
 }
 
 .fab-main {
@@ -70,35 +56,38 @@ body {
 }
 '''
 
-# 2. APP.JSX (Nova Lógica de Agrupamento e Métricas)
+# 2. APP.JSX (Nova Lógica de Agrupamento por Nome e Tempo Ajustado)
 files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
 import { Upload, Navigation, Check, AlertTriangle, Trash2, Plus, ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, ChevronUp, Box, Gauge } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
-import { LocalNotifications } from '@capacitor/local-notifications';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-// --- HELPER DE AGRUPAMENTO ---
-const groupStopsByLocation = (stops) => {
+// --- HELPER: AGRUPAMENTO POR NOME DA PARADA ---
+const groupStopsByName = (stops) => {
     const groups = {};
+    
     stops.forEach(stop => {
-        // Chave única baseada na coordenada (precisão de ~11m)
-        const key = `${stop.lat.toFixed(4)}_${stop.lng.toFixed(4)}`;
+        // Normaliza o nome para garantir agrupamento (remove espaços extras, lowercase)
+        const rawKey = stop.name ? stop.name.trim().toLowerCase() : 'sem_nome';
+        // Usa Lat/Lng como fallback se o nome for genérico
+        const fallbackKey = `${stop.lat.toFixed(4)}_${stop.lng.toFixed(4)}`;
+        const key = rawKey === 'sem_nome' ? fallbackKey : rawKey;
+
         if (!groups[key]) {
             groups[key] = {
-                id: key,
+                id: key, // ID do grupo
                 lat: stop.lat,
                 lng: stop.lng,
-                mainName: stop.name,
-                mainAddress: stop.address,
+                mainName: stop.name, // Nome exibido no card principal
+                mainAddress: stop.address, // Endereço principal
                 items: [],
-                status: 'pending' // pending, partial, success, failed
+                status: 'pending' 
             };
         }
         groups[key].items.push(stop);
     });
 
-    // Recalcula status do grupo
     return Object.values(groups).map(group => {
         const allSuccess = group.items.every(i => i.status === 'success');
         const allFailed = group.items.every(i => i.status === 'failed');
@@ -106,20 +95,23 @@ const groupStopsByLocation = (stops) => {
         
         if (allSuccess) group.status = 'success';
         else if (allFailed) group.status = 'failed';
-        else if (!anyPending) group.status = 'partial'; // Misturado
+        else if (!anyPending) group.status = 'partial';
         else group.status = 'pending';
         
         return group;
     });
 };
 
-// --- HELPER DE MÉTRICAS ---
+// --- HELPER: CÁLCULO DE MÉTRICAS (AJUSTADO) ---
 const calculateMetrics = (stops) => {
+    if (!stops || stops.length < 2) return { km: 0, time: "0h 0m" };
+
     let totalKm = 0;
     for (let i = 0; i < stops.length - 1; i++) {
         const p1 = stops[i];
         const p2 = stops[i+1];
-        // Haversine simplificado
+        
+        // Haversine
         const R = 6371; 
         const dLat = (p2.lat - p1.lat) * Math.PI / 180;
         const dLon = (p2.lng - p1.lng) * Math.PI / 180;
@@ -129,15 +121,26 @@ const calculateMetrics = (stops) => {
         totalKm += R * c;
     }
     
-    // Estimativa: 25km/h média + 5 min por entrega
-    const travelTimeMin = (totalKm / 25) * 60;
-    const serviceTimeMin = stops.length * 5;
+    // --- AJUSTE DE REALISMO ---
+    // 1. Fator de Tortuosidade Urbano: 1.5 (Ruas não são retas)
+    const realKm = totalKm * 1.5;
+    
+    // 2. Velocidade Média Urbana (Considerando trânsito/sinais): 20 km/h
+    const avgSpeedKmH = 20; 
+    
+    // 3. Tempo de Serviço por Entrega: 4 minutos (Estacionar, descer, entregar)
+    const serviceTimeMin = stops.length * 4;
+    
+    const travelTimeMin = (realKm / avgSpeedKmH) * 60;
     const totalMin = travelTimeMin + serviceTimeMin;
     
     const h = Math.floor(totalMin / 60);
     const m = Math.floor(totalMin % 60);
     
-    return { km: (totalKm * 1.3).toFixed(1), time: `${h}h ${m}min` }; // 1.3x fator de correção de rota real
+    return { 
+        km: realKm.toFixed(1), 
+        time: `${h}h ${m}m` 
+    };
 };
 
 export default function App() {
@@ -148,17 +151,17 @@ export default function App() {
   const [tempStops, setTempStops] = useState([]);
   const [userPos, setUserPos] = useState(null);
   
-  // Controle de Expansão (Quais grupos estão abertos na lista)
+  // Controle de Expansão dos Grupos
   const [expandedGroups, setExpandedGroups] = useState({});
 
   useEffect(() => {
-    const saved = localStorage.getItem('mp_routes_v12');
+    const saved = localStorage.getItem('mp_routes_v13');
     if (saved) setRoutes(JSON.parse(saved));
     requestPermissions();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('mp_routes_v12', JSON.stringify(routes));
+    localStorage.setItem('mp_routes_v13', JSON.stringify(routes));
   }, [routes]);
 
   const requestPermissions = async () => {
@@ -188,6 +191,7 @@ export default function App() {
              const k = Object.keys(r).reduce((acc, key) => { acc[key.toLowerCase().trim()] = r[key]; return acc; }, {});
              return {
                  id: Date.now() + i,
+                 // AQUI: A coluna 'stop' define o agrupamento
                  name: k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Entrega ${i+1}`,
                  address: k['destination address'] || k['endereço'] || k['endereco'] || '---',
                  lat: parseFloat(k['latitude'] || k['lat'] || 0),
@@ -212,14 +216,14 @@ export default function App() {
           name: newRouteName, 
           date: new Date().toLocaleDateString(), 
           stops: tempStops,
-          optimized: false // Flag para controle de botões
+          optimized: false 
       };
       setRoutes([newRoute, ...routes]);
       setNewRouteName(''); setTempStops([]); setView('home');
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Tem certeza que deseja excluir esta rota?")) {
+      if(confirm("Excluir rota?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
@@ -249,7 +253,7 @@ export default function App() {
       
       const updated = [...routes];
       updated[idx].stops = [...done, ...optimized];
-      updated[idx].optimized = true; // MARCA COMO OTIMIZADA
+      updated[idx].optimized = true;
       setRoutes(updated);
   };
 
@@ -268,17 +272,21 @@ export default function App() {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
 
+  // Toggle para expandir/colapsar o grupo
   const toggleGroup = (groupId) => {
-      setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+      setExpandedGroups(prev => ({
+          ...prev,
+          [groupId]: !prev[groupId] // Inverte o estado atual
+      }));
   };
 
   // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   
-  // Lógica de Agrupamento Dinâmico
+  // Agrupamento
   const groupedStops = useMemo(() => {
       if (!activeRoute) return [];
-      return groupStopsByLocation(activeRoute.stops);
+      return groupStopsByName(activeRoute.stops);
   }, [activeRoute]);
 
   const metrics = useMemo(() => {
@@ -286,7 +294,6 @@ export default function App() {
       return calculateMetrics(activeRoute.stops);
   }, [activeRoute]);
 
-  // Encontrar o próximo grupo pendente
   const nextGroup = groupedStops.find(g => g.status === 'pending');
 
   if(view === 'home') return (
@@ -344,9 +351,9 @@ export default function App() {
                   <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
               </div>
 
-              {/* BARRA DE MÉTRICAS */}
+              {/* MÉTRICAS (VISÍVEL APÓS OTIMIZAR) */}
               {activeRoute.optimized && (
-                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
+                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4 animate-in fade-in">
                       <div className="flex items-center gap-2">
                           <Gauge size={16} className="text-blue-500"/>
                           <span className="text-xs font-bold text-slate-600">{metrics.km} km</span>
@@ -364,7 +371,7 @@ export default function App() {
                   </div>
               )}
 
-              {/* BOTÕES DE AÇÃO (Lógica de Destaque) */}
+              {/* BOTÕES DE AÇÃO */}
               <div className="flex gap-3">
                   <button 
                       onClick={optimizeActiveRoute} 
@@ -387,10 +394,12 @@ export default function App() {
               </div>
           </div>
 
-          {/* DESTAQUE DA PRÓXIMA PARADA */}
-          <div className="flex-1 overflow-y-auto px-5 pb-safe space-y-4 pt-4">
+          {/* LISTA */}
+          <div className="flex-1 overflow-y-auto px-5 pb-safe space-y-3 pt-4">
+              
+              {/* DESTAQUE DO PRÓXIMO */}
               {nextGroup && activeRoute.optimized && (
-                  <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative">
+                  <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-lg">
                       <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">
                           PRÓXIMO DESTINO
                       </div>
@@ -399,29 +408,17 @@ export default function App() {
                       
                       {nextGroup.items.length > 1 && (
                           <div className="mb-4 bg-blue-50 text-blue-800 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
-                              <Box size={14}/> {nextGroup.items.length} PACOTES NESTE LOCAL
+                              <Box size={14}/> {nextGroup.items.length} PACOTES AQUI
                           </div>
                       )}
 
-                      {/* Itens do Grupo Destaque */}
-                      <div className="space-y-3 mt-4 border-t border-slate-100 pt-3">
+                      <div className="space-y-2 border-t border-slate-100 pt-3">
                           {nextGroup.items.map(item => (
-                              <div key={item.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg">
-                                  <div className="flex-1">
-                                      <span className="font-bold text-sm block">{item.name}</span>
-                                      <span className="text-[10px] text-gray-400">ID: {item.id.toString().slice(-4)}</span>
-                                  </div>
+                              <div key={item.id} className="flex justify-between items-center">
+                                  <span className="text-sm font-medium">{item.name}</span>
                                   <div className="flex gap-2">
-                                      {item.status === 'pending' ? (
-                                          <>
-                                            <button onClick={() => handleStatus(item.id, 'failed')} className="p-2 bg-white text-red-500 rounded border border-red-100"><AlertTriangle size={16}/></button>
-                                            <button onClick={() => handleStatus(item.id, 'success')} className="p-2 bg-green-500 text-white rounded shadow-sm"><Check size={16}/></button>
-                                          </>
-                                      ) : (
-                                          <span className={`text-xs font-bold ${item.status==='success'?'text-green-600':'text-red-600'}`}>
-                                              {item.status === 'success' ? 'ENTREGUE' : 'FALHA'}
-                                          </span>
-                                      )}
+                                      <button onClick={() => handleStatus(item.id, 'failed')} className="p-1.5 bg-red-50 text-red-500 rounded"><AlertTriangle size={14}/></button>
+                                      <button onClick={() => handleStatus(item.id, 'success')} className="p-1.5 bg-green-500 text-white rounded"><Check size={14}/></button>
                                   </div>
                               </div>
                           ))}
@@ -429,10 +426,10 @@ export default function App() {
                   </div>
               )}
 
-              {/* LISTA DE GRUPOS */}
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-6 mb-2">Todos os Locais</h4>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Lista de Entregas</h4>
+              
               {groupedStops.map((group, idx) => {
-                  if (nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null; // Já mostrado no destaque
+                  if (nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
 
                   const isExpanded = expandedGroups[group.id];
                   const isMultiple = group.items.length > 1;
@@ -440,10 +437,10 @@ export default function App() {
                   return (
                       <div key={group.id} className={`modern-card overflow-hidden ${isMultiple ? 'grouped-card' : ''} ${group.status !== 'pending' ? 'opacity-60' : ''}`}>
                           
-                          {/* CABEÇALHO DO CARD */}
+                          {/* CARD HEADER (CLICÁVEL PARA EXPANDIR) */}
                           <div 
-                              className="p-4 flex items-center gap-4 cursor-pointer"
-                              onClick={() => isMultiple && toggleGroup(group.id)}
+                              className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50"
+                              onClick={() => toggleGroup(group.id)} // CLIQUE AQUI ABRE/FECHA
                           >
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs 
                                   ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
@@ -458,17 +455,22 @@ export default function App() {
                                   <p className="text-slate-400 text-xs truncate">{group.mainAddress}</p>
                               </div>
 
-                              {isMultiple ? (
+                              {/* ÍCONE DE EXPANSÃO OU AÇÃO RÁPIDA */}
+                              {isMultiple || isExpanded ? (
                                   isExpanded ? <ChevronUp size={16} className="text-slate-400"/> : <ChevronDown size={16} className="text-slate-400"/>
                               ) : (
-                                  // Botão direto se for só 1 item e estiver pendente
-                                  group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); handleStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 rounded-full text-slate-400 hover:bg-green-50 hover:text-green-600"><Check size={16}/></button>
+                                  // Se for único item e estiver fechado, mostra botão de check rápido
+                                  group.items[0].status === 'pending' && (
+                                    <button onClick={(e) => {e.stopPropagation(); handleStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 hover:text-green-600 rounded-full">
+                                        <Check size={16}/>
+                                    </button>
+                                  )
                               )}
                           </div>
 
-                          {/* CONTEÚDO EXPANDIDO (LISTA DE PACOTES NO MESMO LOCAL) */}
-                          {isMultiple && isExpanded && (
-                              <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
+                          {/* LISTA DE SUB-ITENS (EXPANDIDA) */}
+                          {(isExpanded || (isMultiple && isExpanded)) && (
+                              <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2 animate-in slide-in-from-top-2">
                                   {group.items.map(item => (
                                       <div key={item.id} className="flex justify-between items-center py-2 border-b border-slate-200 last:border-0">
                                           <div className="flex items-center gap-2">
@@ -500,7 +502,7 @@ export default function App() {
 '''
 
 def main():
-    print(f"🚀 ATUALIZAÇÃO V12 (Logistics Master) - {APP_NAME}")
+    print(f"🚀 ATUALIZAÇÃO V13 (Grouping Fix & Time Math) - {APP_NAME}")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
     
@@ -517,7 +519,7 @@ def main():
         
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "feat: V12 Grouping, Metrics & UX Flow"', shell=True)
+    subprocess.run('git commit -m "feat: V13 Group by Stop Name + Realistic Time Calc"', shell=True)
     subprocess.run("git push origin main", shell=True)
     
     try: os.remove(__file__)
