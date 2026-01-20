@@ -10,7 +10,7 @@ APP_NAME = "MotoristaPro-Rota"
 
 files_content = {}
 
-# 1. CSS (Mantido estilo limpo V12)
+# 1. CSS (Mantido estilo limpo)
 files_content['src/index.css'] = '''@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -28,14 +28,13 @@ body {
 .modern-card {
   background: white;
   border-radius: 16px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(0,0,0,0.04);
   transition: all 0.2s ease;
 }
 
-/* Card Agrupado (Indicador visual de pilha) */
 .grouped-card {
-  border-left: 4px solid #3B82F6; /* Azul indicando grupo */
+  border-left: 4px solid #3B82F6;
 }
 
 .fab-main {
@@ -56,31 +55,35 @@ body {
 }
 '''
 
-# 2. APP.JSX (Nova Lógica de Agrupamento por Nome e Tempo Ajustado)
+# 2. APP.JSX (Corrigido e Blindado)
 files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
-import { Upload, Navigation, Check, AlertTriangle, Trash2, Plus, ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, ChevronUp, Box, Gauge } from 'lucide-react';
+// IMPORTANTE: Removido 'Gauge' que causava crash em versoes antigas do lucide
+import { Upload, Navigation, Check, AlertTriangle, Trash2, Plus, ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, ChevronUp, Box, Activity } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-// --- HELPER: AGRUPAMENTO POR NOME DA PARADA ---
+// --- HELPER: AGRUPAMENTO SEGURO ---
 const groupStopsByName = (stops) => {
+    if (!Array.isArray(stops)) return []; // Proteção contra crash
+    
     const groups = {};
     
     stops.forEach(stop => {
-        // Normaliza o nome para garantir agrupamento (remove espaços extras, lowercase)
         const rawKey = stop.name ? stop.name.trim().toLowerCase() : 'sem_nome';
-        // Usa Lat/Lng como fallback se o nome for genérico
-        const fallbackKey = `${stop.lat.toFixed(4)}_${stop.lng.toFixed(4)}`;
+        // Fallback seguro se lat/lng forem invalidos
+        const lat = stop.lat || 0;
+        const lng = stop.lng || 0;
+        const fallbackKey = `${lat.toFixed(4)}_${lng.toFixed(4)}`;
         const key = rawKey === 'sem_nome' ? fallbackKey : rawKey;
 
         if (!groups[key]) {
             groups[key] = {
-                id: key, // ID do grupo
-                lat: stop.lat,
-                lng: stop.lng,
-                mainName: stop.name, // Nome exibido no card principal
-                mainAddress: stop.address, // Endereço principal
+                id: key,
+                lat: lat,
+                lng: lng,
+                mainName: stop.name || 'Sem Nome',
+                mainAddress: stop.address || '---',
                 items: [],
                 status: 'pending' 
             };
@@ -102,16 +105,15 @@ const groupStopsByName = (stops) => {
     });
 };
 
-// --- HELPER: CÁLCULO DE MÉTRICAS (AJUSTADO) ---
+// --- HELPER: MÉTRICAS SEGURAS ---
 const calculateMetrics = (stops) => {
-    if (!stops || stops.length < 2) return { km: 0, time: "0h 0m" };
+    if (!stops || stops.length < 2) return { km: "0.0", time: "0h 0m" };
 
     let totalKm = 0;
     for (let i = 0; i < stops.length - 1; i++) {
         const p1 = stops[i];
         const p2 = stops[i+1];
         
-        // Haversine
         const R = 6371; 
         const dLat = (p2.lat - p1.lat) * Math.PI / 180;
         const dLon = (p2.lng - p1.lng) * Math.PI / 180;
@@ -121,15 +123,10 @@ const calculateMetrics = (stops) => {
         totalKm += R * c;
     }
     
-    // --- AJUSTE DE REALISMO ---
-    // 1. Fator de Tortuosidade Urbano: 1.5 (Ruas não são retas)
+    // Fator 1.5x (Realismo urbano)
     const realKm = totalKm * 1.5;
-    
-    // 2. Velocidade Média Urbana (Considerando trânsito/sinais): 20 km/h
     const avgSpeedKmH = 20; 
-    
-    // 3. Tempo de Serviço por Entrega: 4 minutos (Estacionar, descer, entregar)
-    const serviceTimeMin = stops.length * 4;
+    const serviceTimeMin = stops.length * 4; // 4 min por parada
     
     const travelTimeMin = (realKm / avgSpeedKmH) * 60;
     const totalMin = travelTimeMin + serviceTimeMin;
@@ -150,18 +147,21 @@ export default function App() {
   const [newRouteName, setNewRouteName] = useState('');
   const [tempStops, setTempStops] = useState([]);
   const [userPos, setUserPos] = useState(null);
-  
-  // Controle de Expansão dos Grupos
   const [expandedGroups, setExpandedGroups] = useState({});
 
+  // Recuperação segura
   useEffect(() => {
-    const saved = localStorage.getItem('mp_routes_v13');
-    if (saved) setRoutes(JSON.parse(saved));
+    try {
+        const saved = localStorage.getItem('mp_routes_v14'); // Nova key para limpar cache corrompido
+        if (saved) setRoutes(JSON.parse(saved));
+    } catch(e) {
+        console.error("Erro ao carregar rotas antigas", e);
+    }
     requestPermissions();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('mp_routes_v13', JSON.stringify(routes));
+    localStorage.setItem('mp_routes_v14', JSON.stringify(routes));
   }, [routes]);
 
   const requestPermissions = async () => {
@@ -180,18 +180,22 @@ export default function App() {
 
     const process = (d, bin) => {
         let data = [];
-        if(bin) {
-            const wb = XLSX.read(d, {type:'binary'});
-            data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        } else {
-            data = Papa.parse(d, {header:true, skipEmptyLines:true}).data;
+        try {
+            if(bin) {
+                const wb = XLSX.read(d, {type:'binary'});
+                data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            } else {
+                data = Papa.parse(d, {header:true, skipEmptyLines:true}).data;
+            }
+        } catch (err) {
+            alert("Erro ao ler arquivo. Formato inválido.");
+            return;
         }
         
         const norm = data.map((r, i) => {
              const k = Object.keys(r).reduce((acc, key) => { acc[key.toLowerCase().trim()] = r[key]; return acc; }, {});
              return {
                  id: Date.now() + i,
-                 // AQUI: A coluna 'stop' define o agrupamento
                  name: k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Entrega ${i+1}`,
                  address: k['destination address'] || k['endereço'] || k['endereco'] || '---',
                  lat: parseFloat(k['latitude'] || k['lat'] || 0),
@@ -201,7 +205,7 @@ export default function App() {
         }).filter(i => i.lat !== 0);
 
         if(norm.length) setTempStops(norm);
-        else alert("Erro: Planilha sem coordenadas.");
+        else alert("Nenhuma coordenada encontrada na planilha.");
     };
 
     const reader = new FileReader();
@@ -223,14 +227,14 @@ export default function App() {
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Excluir rota?")) {
+      if(confirm("Excluir rota permanentemente?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
   };
 
   const optimizeActiveRoute = () => {
-      if(!userPos) return alert("Aguardando GPS para otimizar...");
+      if(!userPos) return alert("Aguardando GPS (saia para uma área aberta)...");
       const idx = routes.findIndex(r => r.id === activeRouteId);
       if(idx === -1) return;
 
@@ -240,6 +244,7 @@ export default function App() {
       let optimized = [];
       let current = userPos;
 
+      // Algoritmo Vizinho Mais Próximo
       while(pending.length > 0) {
           let nearIdx = -1, min = Infinity;
           for(let i=0; i<pending.length; i++) {
@@ -259,6 +264,7 @@ export default function App() {
 
   const handleStatus = (stopId, status) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
+      if(rIdx === -1) return;
       const updated = [...routes];
       const sIdx = updated[rIdx].stops.findIndex(s => s.id === stopId);
       
@@ -272,30 +278,26 @@ export default function App() {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
 
-  // Toggle para expandir/colapsar o grupo
   const toggleGroup = (groupId) => {
-      setExpandedGroups(prev => ({
-          ...prev,
-          [groupId]: !prev[groupId] // Inverte o estado atual
-      }));
+      setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
   // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   
-  // Agrupamento
   const groupedStops = useMemo(() => {
-      if (!activeRoute) return [];
+      if (!activeRoute || !activeRoute.stops) return [];
       return groupStopsByName(activeRoute.stops);
   }, [activeRoute]);
 
   const metrics = useMemo(() => {
-      if (!activeRoute) return { km: 0, time: 0 };
+      if (!activeRoute || !activeRoute.stops) return { km: "0.0", time: "0h 0m" };
       return calculateMetrics(activeRoute.stops);
   }, [activeRoute]);
 
   const nextGroup = groupedStops.find(g => g.status === 'pending');
 
+  // VIEW: HOME
   if(view === 'home') return (
     <div className="min-h-screen pb-28 px-5 pt-8">
         <div className="flex justify-between items-center mb-8">
@@ -306,16 +308,17 @@ export default function App() {
             <div className="flex flex-col items-center justify-center mt-32 opacity-40">
                 <MapPin size={48} className="mb-4"/>
                 <p className="font-medium">Nenhuma rota ativa</p>
+                <p className="text-sm text-gray-400 mt-2">Toque em + para criar</p>
             </div>
         ) : (
             <div className="space-y-4">
                 {routes.map(r => (
-                    <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer hover:shadow-md">
+                    <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer hover:shadow-md border-l-4 border-transparent hover:border-blue-500">
                         <div className="flex justify-between items-start mb-2">
                             <h3 className="font-bold text-lg text-slate-800">{r.name}</h3>
                             <span className="text-xs text-slate-400 font-medium">{r.date}</span>
                         </div>
-                        <div className="text-sm text-slate-500">{r.stops.length} entregas</div>
+                        <div className="text-sm text-slate-500">{r.stops ? r.stops.length : 0} entregas</div>
                     </div>
                 ))}
             </div>
@@ -324,38 +327,38 @@ export default function App() {
     </div>
   );
 
+  // VIEW: CREATE
   if(view === 'create') return (
     <div className="min-h-screen bg-white flex flex-col p-6">
         <button onClick={() => setView('home')} className="self-start mb-6 p-2 -ml-2"><ArrowLeft className="text-slate-800"/></button>
         <h2 className="text-2xl font-bold mb-8 text-slate-900">Nova Rota</h2>
         <div className="space-y-6 flex-1">
-            <input type="text" placeholder="Nome da Rota" className="w-full p-5 bg-slate-50 rounded-2xl text-lg font-medium outline-none" value={newRouteName} onChange={e => setNewRouteName(e.target.value)} />
+            <input type="text" placeholder="Nome da Rota" className="w-full p-5 bg-slate-50 rounded-2xl text-lg font-medium outline-none border border-slate-100 focus:border-slate-300" value={newRouteName} onChange={e => setNewRouteName(e.target.value)} />
             <label className="block w-full cursor-pointer group">
                 <div className="w-full border-2 border-dashed border-slate-200 rounded-2xl h-40 flex flex-col items-center justify-center text-slate-400"><Upload className="mb-2"/><span className="font-bold text-sm">Importar Planilha</span></div>
                 <input type="file" onChange={handleFileUpload} accept=".csv,.xlsx" className="hidden"/>
             </label>
-            {tempStops.length > 0 && <div className="p-4 bg-green-50 text-green-700 rounded-xl font-bold text-center border border-green-100">{tempStops.length} endereços</div>}
+            {tempStops.length > 0 && <div className="p-4 bg-green-50 text-green-700 rounded-xl font-bold text-center border border-green-100">{tempStops.length} endereços identificados</div>}
         </div>
         <button onClick={saveNewRoute} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-bold text-lg mb-4">Criar Rota</button>
     </div>
   );
 
+  // VIEW: DETAILS
   if(view === 'details' && activeRoute) return (
       <div className="flex flex-col h-screen bg-slate-50">
           
-          {/* HEADER */}
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft className="text-slate-800"/></button>
-                  <h2 className="font-bold text-slate-800 truncate px-4">{activeRoute.name}</h2>
+                  <h2 className="font-bold text-slate-800 truncate px-4 flex-1 text-center">{activeRoute.name}</h2>
                   <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
               </div>
 
-              {/* MÉTRICAS (VISÍVEL APÓS OTIMIZAR) */}
               {activeRoute.optimized && (
                   <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4 animate-in fade-in">
                       <div className="flex items-center gap-2">
-                          <Gauge size={16} className="text-blue-500"/>
+                          <Activity size={16} className="text-blue-500"/>
                           <span className="text-xs font-bold text-slate-600">{metrics.km} km</span>
                       </div>
                       <div className="w-px h-4 bg-slate-200"></div>
@@ -371,7 +374,6 @@ export default function App() {
                   </div>
               )}
 
-              {/* BOTÕES DE AÇÃO */}
               <div className="flex gap-3">
                   <button 
                       onClick={optimizeActiveRoute} 
@@ -394,10 +396,8 @@ export default function App() {
               </div>
           </div>
 
-          {/* LISTA */}
           <div className="flex-1 overflow-y-auto px-5 pb-safe space-y-3 pt-4">
               
-              {/* DESTAQUE DO PRÓXIMO */}
               {nextGroup && activeRoute.optimized && (
                   <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-lg">
                       <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">
@@ -437,10 +437,9 @@ export default function App() {
                   return (
                       <div key={group.id} className={`modern-card overflow-hidden ${isMultiple ? 'grouped-card' : ''} ${group.status !== 'pending' ? 'opacity-60' : ''}`}>
                           
-                          {/* CARD HEADER (CLICÁVEL PARA EXPANDIR) */}
                           <div 
                               className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50"
-                              onClick={() => toggleGroup(group.id)} // CLIQUE AQUI ABRE/FECHA
+                              onClick={() => toggleGroup(group.id)} 
                           >
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs 
                                   ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
@@ -455,11 +454,9 @@ export default function App() {
                                   <p className="text-slate-400 text-xs truncate">{group.mainAddress}</p>
                               </div>
 
-                              {/* ÍCONE DE EXPANSÃO OU AÇÃO RÁPIDA */}
                               {isMultiple || isExpanded ? (
                                   isExpanded ? <ChevronUp size={16} className="text-slate-400"/> : <ChevronDown size={16} className="text-slate-400"/>
                               ) : (
-                                  // Se for único item e estiver fechado, mostra botão de check rápido
                                   group.items[0].status === 'pending' && (
                                     <button onClick={(e) => {e.stopPropagation(); handleStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 hover:text-green-600 rounded-full">
                                         <Check size={16}/>
@@ -468,7 +465,6 @@ export default function App() {
                               )}
                           </div>
 
-                          {/* LISTA DE SUB-ITENS (EXPANDIDA) */}
                           {(isExpanded || (isMultiple && isExpanded)) && (
                               <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2 animate-in slide-in-from-top-2">
                                   {group.items.map(item => (
@@ -502,11 +498,11 @@ export default function App() {
 '''
 
 def main():
-    print(f"🚀 ATUALIZAÇÃO V13 (Grouping Fix & Time Math) - {APP_NAME}")
+    print(f"🚀 ATUALIZAÇÃO V14 (STABILITY FIX) - {APP_NAME}")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
     
-    print("\n📝 Atualizando arquivos...")
+    print("\n📝 Escrevendo arquivos...")
     for f, c in files_content.items():
         if os.path.exists(f): 
             dest = f"{BACKUP_ROOT}/{ts}/{f}"
@@ -519,7 +515,7 @@ def main():
         
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "feat: V13 Group by Stop Name + Realistic Time Calc"', shell=True)
+    subprocess.run('git commit -m "fix: V14 Stability - Remove Gauge icon and Safe Data Loading"', shell=True)
     subprocess.run("git push origin main", shell=True)
     
     try: os.remove(__file__)
