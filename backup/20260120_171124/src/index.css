@@ -1,7 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@import 'maplibre-gl/dist/maplibre-gl.css';
+@import 'leaflet/dist/leaflet.css';
 
 body {
   margin: 0;
@@ -9,13 +9,34 @@ body {
   background-color: #F8FAFC;
   color: #0F172A;
   -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none; /* Previne pull-to-refresh acidental */
 }
 
-/* Otimização de Mapa */
-.map-container {
+/* Otimização do Mapa */
+.leaflet-container {
   width: 100%;
   height: 100%;
-  position: relative;
+  z-index: 0;
+  background: #e5e7eb;
+}
+
+/* Ícone de Destaque (Apenas para o alvo atual) */
+.pin-target {
+  background-color: #0F172A;
+  border: 3px solid white;
+  border-radius: 50%;
+  color: white;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  animation: pulse-pin 2s infinite;
+}
+
+@keyframes pulse-pin {
+  0% { box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(15, 23, 42, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(15, 23, 42, 0); }
 }
 
 /* Cards */
@@ -27,7 +48,7 @@ body {
   transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
 }
-.modern-card:active { transform: scale(0.99); }
+.modern-card:active { transform: scale(0.98); }
 
 /* Cores de Status */
 .border-l-status-pending { border-left: 5px solid #3B82F6; }
@@ -49,23 +70,6 @@ body {
   transition: background-color 0.1s;
 }
 
-.fab-main {
-  background: #0F172A;
-  color: white;
-  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
-}
-
-.btn-highlight {
-  background-color: #2563EB;
-  color: white;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-}
-
-.btn-secondary {
-  background-color: #F1F5F9;
-  color: #64748B;
-}
-
-/* Toast Animation */
+/* Toast */
 .toast-anim { animation: slideIn 0.3s ease-out forwards; }
 @keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

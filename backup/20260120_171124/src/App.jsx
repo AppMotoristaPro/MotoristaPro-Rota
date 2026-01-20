@@ -1,17 +1,26 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, memo } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
   ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
-import Map, { Marker, NavigationControl } from 'react-map-gl/maplibre';
+import { MapContainer, TileLayer, Marker, CircleMarker, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v27_ultimate';
+const DB_KEY = 'mp_db_v26_flow';
 
 // --- HELPERS ---
+
+// Ícone apenas para o alvo atual (HTML pesado, mas só 1 por vez)
+const targetIcon = L.divIcon({
+    className: 'pin-target',
+    html: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
+    iconSize: [40, 40],
+    iconAnchor: [20, 40]
+});
 
 const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
@@ -50,6 +59,7 @@ const groupStopsByStopName = (stops) => {
             
             if (success === total) group.status = 'success';
             else if (failed === total) group.status = 'failed';
+            else if (success + failed === total) group.status = 'partial'; // Terminou misto
             else if (success + failed > 0) group.status = 'partial'; // Em andamento
             else group.status = 'pending';
 
@@ -61,47 +71,49 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-const calculateRemainingMetrics = (stops, userPos) => {
-    if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
+// Componente de Mapa Otimizado (Memoizado para não recarregar a toa)
+const OptimizedMap = memo(({ center, groups, nextGroupId }) => {
     
-    const pendingStops = stops.filter(s => s.status === 'pending');
-    
-    if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
-
-    let totalKm = 0;
-    let currentLat = userPos ? userPos.lat : pendingStops[0].lat;
-    let currentLng = userPos ? userPos.lng : pendingStops[0].lng;
-
-    const calcDist = (lat1, lon1, lat2, lon2) => {
-        const R = 6371; 
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-        return R * c;
+    // Sub-componente para mover a câmera
+    const MapController = ({ center }) => {
+        const map = useMap();
+        useEffect(() => {
+            if (center) map.flyTo(center, 16, { animate: true, duration: 1 });
+        }, [center, map]);
+        return null;
     };
 
-    pendingStops.forEach(stop => {
-        totalKm += calcDist(currentLat, currentLng, stop.lat, stop.lng);
-        currentLat = stop.lat;
-        currentLng = stop.lng;
-    });
+    return (
+        <MapContainer center={center || [-23.55, -46.63]} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+            {/* Tile Layer leve e rápido (CartoDB Voyager) */}
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+            
+            <MapController center={center} />
 
-    const realKm = totalKm * 1.6; 
-    const avgSpeed = 18; 
-    const serviceTime = pendingStops.length * 4; 
-    const totalMin = (realKm / avgSpeed * 60) + serviceTime;
-    
-    const h = Math.floor(totalMin / 60);
-    const m = Math.floor(totalMin % 60);
+            {groups.map((group) => {
+                const isNext = group.id === nextGroupId;
+                
+                // Se for o próximo, usa o pino de destaque
+                if (isNext) {
+                    return <Marker key={group.id} position={[group.lat, group.lng]} icon={targetIcon} zIndexOffset={1000} />
+                }
 
-    return { 
-        km: realKm.toFixed(1), 
-        time: `${h}h ${m}m`,
-        remainingPackages: pendingStops.length
-    };
-};
+                // Para os outros, usa CircleMarker (SVG/Canvas) que é MUITO mais leve que HTML Marker
+                const color = group.status === 'success' ? '#10B981' : group.status === 'failed' ? '#EF4444' : '#3B82F6';
+                const fillColor = group.status === 'pending' ? '#FFFFFF' : color;
+                
+                return (
+                    <CircleMarker 
+                        key={group.id} 
+                        center={[group.lat, group.lng]} 
+                        radius={6}
+                        pathOptions={{ color: color, fillColor: fillColor, fillOpacity: 1, weight: 2 }} 
+                    />
+                )
+            })}
+        </MapContainer>
+    );
+});
 
 export default function App() {
   const [routes, setRoutes] = useState([]);
@@ -115,9 +127,6 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
-  
-  // Ref do Mapa
-  const mapRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -253,11 +262,12 @@ export default function App() {
   // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
-  
-  // LÓGICA DE NEXT GROUP V27 (Bloqueante)
-  // Encontra o primeiro grupo que tem status 'pending' OU 'partial' (começou mas não terminou)
-  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
+  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial'); // Partial também é "next" se tiver itens pendentes
 
+  // Identifica o próximo pacote pendente dentro do grupo atual
+  const nextPackageInGroup = nextGroup ? nextGroup.items.find(i => i.status === 'pending') : null;
+
+  // Filtragem
   const filteredGroups = useMemo(() => {
       if (!searchQuery) return groupedStops;
       const lower = searchQuery.toLowerCase();
@@ -266,11 +276,6 @@ export default function App() {
           g.mainAddress.toLowerCase().includes(lower)
       );
   }, [groupedStops, searchQuery]);
-
-  const metrics = useMemo(() => {
-      if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-      return calculateRemainingMetrics(activeRoute.stops, userPos);
-  }, [activeRoute, userPos, routes]);
 
   // VIEW: HOME
   if (view === 'home') return (
@@ -344,24 +349,6 @@ export default function App() {
               </div>
               
               {!showMap && (
-                  <div className="relative mb-4">
-                      <Search size={18} className="absolute left-3 top-3 text-slate-400"/>
-                      <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl search-input text-sm font-medium outline-none" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
-                      {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400"><X size={16}/></button>}
-                  </div>
-              )}
-
-              {activeRoute.optimized && !searchQuery && !showMap && (
-                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4 animate-in fade-in">
-                      <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold text-slate-600">{metrics.km} km</span></div>
-                      <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold text-slate-600">~{metrics.time}</span></div>
-                      <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold text-slate-600">{metrics.remainingPackages} rest.</span></div>
-                  </div>
-              )}
-              
-              {!searchQuery && !showMap && (
                   <div className="flex gap-3">
                       <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} 
@@ -378,31 +365,13 @@ export default function App() {
 
           {showMap ? (
               <div className="flex-1 relative bg-slate-100">
-                  <Map 
-                      initialViewState={{
-                          longitude: nextGroup?.lng || -46.63,
-                          latitude: nextGroup?.lat || -23.55,
-                          zoom: 14
-                      }}
-                      style={{width: '100%', height: '100%'}}
-                      mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
-                  >
-                      <NavigationControl position="top-right" />
-                      {nextGroup && (
-                          <Marker longitude={nextGroup.lng} latitude={nextGroup.lat} anchor="bottom">
-                              <div className="text-4xl">📍</div>
-                          </Marker>
-                      )}
-                      {groupedStops.map((g) => {
-                          if (nextGroup && g.id === nextGroup.id) return null;
-                          return (
-                              <Marker key={g.id} longitude={g.lng} latitude={g.lat} anchor="center">
-                                  <div className={`w-3 h-3 rounded-full border border-white ${g.status==='success'?'bg-green-500':g.status==='failed'?'bg-red-500':'bg-blue-500'}`} />
-                              </Marker>
-                          )
-                      })}
-                  </Map>
-                  
+                  {/* MAPA OTIMIZADO */}
+                  <OptimizedMap 
+                      center={nextGroup ? [nextGroup.lat, nextGroup.lng] : userPos} 
+                      groups={groupedStops} 
+                      nextGroupId={nextGroup?.id} 
+                  />
+                  {/* OVERLAY DE STATUS NO MAPA */}
                   {nextGroup && (
                       <div className="absolute bottom-6 left-4 right-4 bg-white p-4 rounded-xl shadow-xl z-[1000] border border-slate-200">
                           <h3 className="font-bold text-slate-900 truncate">{nextGroup.mainName}</h3>
@@ -413,19 +382,29 @@ export default function App() {
               </div>
           ) : (
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
+                  
+                  {/* DESTAQUE DO PRÓXIMO PACOTE (FLUXO CONTÍNUO) */}
                   {!searchQuery && nextGroup && activeRoute.optimized && (
-                      <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-500">
+                      <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-300">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
                           <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{nextGroup.mainName}</h3>
                           <p className="text-sm text-slate-500 mb-4">{nextGroup.mainAddress}</p>
-                          {nextGroup.items.length > 1 && <div className="mb-4 bg-blue-50 text-blue-800 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><Box size={14}/> {nextGroup.items.length} PACOTES</div>}
+                          
+                          {/* LISTA DE PACOTES PENDENTES DESTE LOCAL */}
                           <div className="space-y-3 border-t border-slate-100 pt-3">
                               {nextGroup.items.map(item => {
+                                  // Só mostra os pendentes no destaque para focar no trabalho
                                   if (item.status !== 'pending') return null;
                                   return (
-                                      <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                          <div className="mb-3"><span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span><span className="text-[10px] text-slate-400 block mt-1">Ref: {item.recipient}</span></div>
-                                          <div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={20} className="mb-1"/> Não Entregue</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={24} className="mb-1"/> ENTREGUE</button></div>
+                                      <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100 animate-in fade-in">
+                                          <div className="mb-3">
+                                              <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
+                                              <span className="text-[10px] text-slate-400 block mt-1">Ref: {item.recipient}</span>
+                                          </div>
+                                          <div className="flex gap-2 w-full">
+                                              <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={20} className="mb-1"/> Falha</button>
+                                              <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={24} className="mb-1"/> ENTREGUE</button>
+                                          </div>
                                       </div>
                                   )
                               })}
@@ -433,10 +412,12 @@ export default function App() {
                       </div>
                   )}
 
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">{searchQuery ? 'Resultados' : 'Sequência de Paradas'}</h4>
+                  {/* LISTA DE TUDO (Histórico + Futuro) */}
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1 mt-4">Todos os Locais</h4>
 
                   {filteredGroups.map((group) => {
-                      if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
+                      if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null; // Já no destaque
+                      
                       const isExpanded = expandedGroups[group.id];
                       const hasMulti = group.items.length > 1;
                       const statusClass = `border-l-status-${group.status}`;
@@ -449,7 +430,7 @@ export default function App() {
                                   {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18} className="text-slate-400"/> : <ChevronDown size={18} className="text-slate-400"/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 hover:text-green-600 rounded-full"><Check size={18}/></button>)}
                               </div>
                               {(isExpanded || (hasMulti && isExpanded)) && (
-                                  <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3 animate-in slide-in-from-top-2">
+                                  <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
                                       {group.items.map(item => (
                                           <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
                                               <div className="mb-2"><span className="text-sm font-bold text-slate-700 block">{item.address}</span><span className="text-[10px] text-slate-400">{item.name}</span></div>
