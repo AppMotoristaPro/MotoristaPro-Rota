@@ -1,4 +1,79 @@
-import React, { useState, useEffect, useRef } from 'react';
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+# --- CONTEÚDO DOS ARQUIVOS ---
+
+files_content = {}
+
+# 1. capacitor.config.json (Atualizando Nome do App)
+files_content['capacitor.config.json'] = f'''{{
+  "appId": "com.motoristapro.app",
+  "appName": "{APP_NAME}",
+  "webDir": "dist",
+  "server": {{
+    "androidScheme": "https"
+  }}
+}}'''
+
+# 2. index.html (Atualizando Título)
+files_content['index.html'] = f'''<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>{APP_NAME}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>'''
+
+# 3. package.json (Mantendo dependências)
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "1.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "leaflet-routing-machine": "^3.2.12",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/cli": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  }
+}'''
+
+# 4. src/App.jsx (A Lógica Completa V4)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Map as MapIcon, Navigation, List, Truck, Check, AlertTriangle, ChevronRight, Package, MapPin } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -384,4 +459,69 @@ export default function App() {
       )}
     </div>
   );
-}
+}'''
+
+# --- FUNÇÕES AUXILIARES ---
+
+def backup_files():
+    """Backup com timestamp"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+    print(f"📦 Criando backup em: {backup_dir} ...")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    for filename in files_content.keys():
+        if os.path.exists(filename):
+            dest = os.path.join(backup_dir, filename)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(filename, dest)
+
+def update_files():
+    """Grava os novos arquivos"""
+    print("\n📝 Atualizando arquivos (V4)...")
+    for filename, content in files_content.items():
+        directory = os.path.dirname(filename)
+        if directory: os.makedirs(directory, exist_ok=True)
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"   ✅ Atualizado: {filename}")
+
+def run_command(command, msg):
+    try:
+        subprocess.run(command, shell=True, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        print(f"❌ Erro: {msg}")
+        return False
+
+def main():
+    print(f"🚀 INICIANDO ATUALIZAÇÃO V4 - {APP_NAME}")
+    
+    # 1. Backup
+    backup_files()
+    
+    # 2. Update Files
+    update_files()
+    
+    # 3. Git Push
+    print("\n☁️ Enviando para GitHub...")
+    run_command("git add .", "Git Add falhou")
+    run_command('git commit -m "feat: V4 Spoke Style UI + Google Maps + Real Navigation"', "Commit falhou")
+    push_ok = run_command("git push origin main", "Push falhou")
+    
+    if push_ok:
+        print("\n✅ SUCESSO! V4 ENVIADA.")
+    else:
+        print("\n⚠️ Erro no Push.")
+
+    # 4. Autodestruição
+    print("\n💥 Limpando script...")
+    try:
+        os.remove(__file__)
+    except:
+        pass
+
+if __name__ == "__main__":
+    main()
+
+

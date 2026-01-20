@@ -1,6 +1,6 @@
 {
   "appId": "com.motoristapro.app",
-  "appName": "MotoristaPro-Rota",
+  "appName": "MotoristaPro",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"
