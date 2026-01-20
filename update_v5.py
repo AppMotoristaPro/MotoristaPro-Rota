@@ -1,4 +1,79 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+# --- CONTEÚDO DOS ARQUIVOS ---
+
+files_content = {}
+
+# 1. src/index.css (Adicionando estilos para os marcadores numéricos e animações)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background-color: #f8fafc;
+}
+
+/* --- MARCADORES PERSONALIZADOS (CSS PURA PARA PERFORMANCE) --- */
+.custom-pin {
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  transition: transform 0.2s;
+}
+
+.pin-success { background-color: #22c55e; } /* Verde */
+.pin-failed { background-color: #ef4444; }  /* Vermelho */
+.pin-active { 
+  background-color: #eab308; /* Amarelo/Dourado */
+  transform: scale(1.2);
+  border: 3px solid white;
+  z-index: 1000 !important;
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.6);
+}
+
+/* Animação de Pulso para o GPS do Usuário */
+.user-gps-marker {
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  animation: pulse-blue 2s infinite;
+}
+
+@keyframes pulse-blue {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+/* Container de Navegação estilo Google Maps */
+.nav-panel-top {
+  background: #1e293b;
+  color: white;
+}
+'''
+
+# 2. src/App.jsx (Lógica completa refeita para GPS Real e Performance)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Upload, Map as MapIcon, Navigation, List, Truck, Check, AlertTriangle, ChevronRight, MapPin, Clock, Gauge } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -399,4 +474,53 @@ export default function App() {
       )}
     </div>
   );
-}
+}'''
+
+# --- FUNÇÕES AUXILIARES ---
+
+def backup_files():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+    print(f"📦 Backup: {backup_dir}")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    for filename in files_content.keys():
+        if os.path.exists(filename):
+            dest = os.path.join(backup_dir, filename)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(filename, dest)
+
+def update_files():
+    print("\n📝 Atualizando V5...")
+    for filename, content in files_content.items():
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"   ✅ {filename}")
+
+def run_command(command, msg):
+    try:
+        subprocess.run(command, shell=True, check=True)
+        return True
+    except:
+        print(f"❌ {msg}")
+        return False
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V5 - PERFORMANCE & GPS - {APP_NAME}")
+    backup_files()
+    update_files()
+    
+    print("\n☁️ GitHub Push...")
+    run_command("git add .", "Add failed")
+    run_command('git commit -m "feat: V5 High Performance, Real GPS, Metrics & Styles"', "Commit failed")
+    if run_command("git push origin main", "Push failed"):
+        print("\n✅ SUCESSO! Código enviado.")
+    
+    try: os.remove(__file__) 
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
