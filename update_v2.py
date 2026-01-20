@@ -1,4 +1,53 @@
-import React, { useState, useEffect, useRef } from 'react';
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+
+# --- CONTEÚDO DOS NOVOS ARQUIVOS ---
+
+# 1. package.json (Adicionando 'xlsx' para ler Excel e 'leaflet-routing-machine' para navegação)
+files_content = {}
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "leaflet-routing-machine": "^3.2.12",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/cli": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  }
+}'''
+
+# 2. src/App.jsx (Lógica nova: Upload de arquivo e Roteamento Interno)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Map as MapIcon, Navigation, List, X, Truck, FileSpreadsheet } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -24,6 +73,7 @@ function RoutingMachine({ userLocation, destination }) {
   useEffect(() => {
     if (!map || !userLocation || !destination) return;
 
+    // Remove rota anterior se existir
     if (routingControlRef.current) {
       map.removeControl(routingControlRef.current);
     }
@@ -34,7 +84,7 @@ function RoutingMachine({ userLocation, destination }) {
         L.latLng(destination.lat, destination.lng)
       ],
       {
-        createMarker: () => null,
+        createMarker: () => null, // Não criar marcadores extras, já temos os nossos
         addWaypoints: false,
         draggableWaypoints: false
       }
@@ -50,9 +100,9 @@ function RoutingMachine({ userLocation, destination }) {
         styles: [{ color: '#3b82f6', weight: 6, opacity: 0.8 }]
       },
       routeWhileDragging: false,
-      show: true,
-      language: 'pt-br',
-      containerClassName: 'routing-container-custom'
+      show: true, // Mostra o painel de instruções
+      language: 'pt-br', // Tenta português (pode variar dependendo do suporte do OSRM)
+      containerClassName: 'routing-container-custom' // Classe para estilizarmos se precisar
     }).addTo(map);
 
     return () => {
@@ -81,10 +131,12 @@ function MapRecenter({ points, focus }) {
 export default function App() {
   const [view, setView] = useState('import');
   const [stops, setStops] = useState([]);
-  const [activeRoute, setActiveRoute] = useState(null);
-  const [userLocation, setUserLocation] = useState(null);
+  const [activeRoute, setActiveRoute] = useState(null); // Para navegação interna
+  const [userLocation, setUserLocation] = useState(null); // Simulado para demo
   
+  // Simula pegar GPS atual (Para demo, pegamos um ponto perto de SP)
   useEffect(() => {
+    // Em produção usaríamos navigator.geolocation.watchPosition
     setUserLocation({ lat: -23.5505, lng: -46.6333 }); 
   }, []);
 
@@ -101,6 +153,7 @@ export default function App() {
         const result = Papa.parse(bstr, { header: true, skipEmptyLines: true });
         data = processData(result.data);
       } else {
+        // Excel processing
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
@@ -125,6 +178,7 @@ export default function App() {
 
   const processData = (rawData) => {
     return rawData.map((row, index) => {
+      // Normaliza chaves
       const keys = Object.keys(row).reduce((acc, k) => { acc[k.toLowerCase().trim()] = row[k]; return acc; }, {});
       
       const lat = parseFloat(keys['latitude'] || keys['lat'] || 0);
@@ -149,9 +203,11 @@ export default function App() {
   const optimizeRoute = () => {
     if (stops.length === 0) return;
     let remaining = [...stops];
+    // Usa localização do usuario ou primeira parada como inicio
     let current = userLocation ? { ...userLocation, id: 'start' } : remaining.shift();
     let route = [];
     
+    // Se removemos o primeiro da lista, adicionamos ele de volta na rota
     if (!userLocation) route.push(current);
 
     while (remaining.length > 0) {
@@ -245,10 +301,12 @@ export default function App() {
               
               <MapRecenter points={stops} focus={activeRoute} />
               
+              {/* Navegação Interna */}
               {activeRoute && userLocation && (
                   <RoutingMachine userLocation={userLocation} destination={activeRoute} />
               )}
 
+              {/* Marcadores */}
               {stops.map((stop, index) => (
                 <Marker key={stop.id} position={[stop.lat, stop.lng]}>
                   <Popup>
@@ -261,6 +319,7 @@ export default function App() {
                 </Marker>
               ))}
               
+              {/* Marcador do Usuário (Simulado) */}
               {userLocation && (
                   <Marker position={[userLocation.lat, userLocation.lng]} icon={L.icon({
                       iconUrl: 'https://cdn-icons-png.flaticon.com/512/535/535188.png', 
@@ -286,4 +345,82 @@ export default function App() {
       </nav>
     </div>
   );
-}
+}'''
+
+# --- FUNÇÕES AUXILIARES ---
+
+def backup_files():
+    """Cria backup dos arquivos que serão modificados"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+    
+    print(f"📦 Criando backup em: {backup_dir} ...")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    files_to_backup = list(files_content.keys())
+    
+    for filename in files_to_backup:
+        if os.path.exists(filename):
+            dest = os.path.join(backup_dir, filename)
+            # Cria subpastas no backup se necessário (ex: src/)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(filename, dest)
+            print(f"   💾 Backup de {filename} ok.")
+        else:
+            print(f"   ⚠️ {filename} não existe (será criado).")
+
+def update_files():
+    """Escreve os novos conteúdos"""
+    print("\n📝 Atualizando arquivos...")
+    for filename, content in files_content.items():
+        # Garantir diretório
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"   ✅ Atualizado: {filename}")
+
+def run_command(command, msg):
+    try:
+        subprocess.run(command, shell=True, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        print(f"❌ Erro: {msg}")
+        return False
+
+def main():
+    print("🚀 INICIANDO ATUALIZAÇÃO v2.0 - MOTORISTAPRO")
+    
+    # 1. Backup
+    backup_files()
+    
+    # 2. Atualizar código
+    update_files()
+    
+    # 3. Instalar novas dependências (xlsx, leaflet-routing-machine)
+    print("\n📦 Instalando novas bibliotecas (pode demorar)...")
+    run_command("npm install", "Falha no npm install")
+    
+    # 4. Git Push Automático
+    print("\n☁️ Enviando para GitHub...")
+    run_command("git add .", "Git Add falhou")
+    run_command('git commit -m "feat: Upload de Arquivos e Navegacao Interna"', "Git Commit falhou")
+    
+    push_ok = run_command("git push origin main", "Git Push falhou")
+    
+    if push_ok:
+        print("\n✅ ATUALIZAÇÃO CONCLUÍDA E ENVIADA!")
+    else:
+        print("\n⚠️ O código foi atualizado localmente, mas falhou ao enviar pro GitHub.")
+
+    # 5. Autodestruição
+    print("\n💥 Autodestruindo script de atualização...")
+    try:
+        os.remove(__file__)
+        print("   Script removido com sucesso.")
+    except Exception as e:
+        print(f"   Erro ao deletar script: {e}")
+
+if __name__ == "__main__":
+    main()
+
+

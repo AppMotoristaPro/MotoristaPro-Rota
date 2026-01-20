@@ -1,4 +1,54 @@
-import React, { useState, useEffect, useRef } from 'react';
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+
+# --- CONTEÚDO DOS NOVOS ARQUIVOS ---
+
+files_content = {}
+
+# 1. package.json
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "leaflet-routing-machine": "^3.2.12",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/cli": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  }
+}'''
+
+# 2. src/App.jsx
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Map as MapIcon, Navigation, List, X, Truck, FileSpreadsheet } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -286,4 +336,86 @@ export default function App() {
       </nav>
     </div>
   );
-}
+}'''
+
+# --- FUNÇÕES AUXILIARES ---
+
+def backup_files():
+    """Cria backup dos arquivos que serão modificados"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+    
+    print(f"📦 Criando backup em: {backup_dir} ...")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    files_to_backup = list(files_content.keys())
+    
+    for filename in files_to_backup:
+        if os.path.exists(filename):
+            dest = os.path.join(backup_dir, filename)
+            # Cria subpastas no backup se necessário (ex: src/)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(filename, dest)
+            print(f"   💾 Backup de {filename} ok.")
+        else:
+            # Não poluir o log se não existir
+            pass
+
+def update_files():
+    """Escreve os novos conteúdos"""
+    print("\n📝 Atualizando arquivos...")
+    for filename, content in files_content.items():
+        # CORREÇÃO AQUI: Verifica se há diretório antes de criar
+        directory = os.path.dirname(filename)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+            
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"   ✅ Atualizado: {filename}")
+
+def run_command(command, msg):
+    try:
+        subprocess.run(command, shell=True, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        print(f"❌ Erro: {msg}")
+        return False
+
+def main():
+    print("🚀 INICIANDO ATUALIZAÇÃO v3.0 (FIX) - MOTORISTAPRO")
+    
+    # 1. Backup
+    backup_files()
+    
+    # 2. Atualizar código
+    update_files()
+    
+    # 3. Instalar novas dependências (xlsx, leaflet-routing-machine)
+    print("\n📦 Instalando novas bibliotecas (pode demorar)...")
+    run_command("npm install", "Falha no npm install")
+    
+    # 4. Git Push Automático
+    print("\n☁️ Enviando para GitHub...")
+    run_command("git add .", "Git Add falhou")
+    run_command('git commit -m "feat: Upload de Arquivos e Navegacao Interna (Fix)"', "Nada para commitar ou falha")
+    
+    push_ok = run_command("git push origin main", "Git Push falhou")
+    
+    if push_ok:
+        print("\n✅ ATUALIZAÇÃO CONCLUÍDA E ENVIADA!")
+    else:
+        print("\n⚠️ O código foi atualizado localmente, mas falhou ao enviar pro GitHub.")
+
+    # 5. Autodestruição
+    print("\n💥 Autodestruindo script de atualização...")
+    try:
+        os.remove(__file__)
+        print("   Script removido com sucesso.")
+    except Exception as e:
+        print(f"   Erro ao deletar script: {e}")
+
+if __name__ == "__main__":
+    main()
+
+
