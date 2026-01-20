@@ -1,4 +1,151 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. PACKAGE.JSON (Voltando para Leaflet que é mais compatível)
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "1.8.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "xlsx": "^0.18.5",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
+    "@capacitor/geolocation": "^5.0.0",
+    "@capacitor/local-notifications": "^5.0.0",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/cli": "^5.0.0"
+  }
+}'''
+
+# 2. CSS (Ajustes para Leaflet e UI)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import 'leaflet/dist/leaflet.css';
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Otimização do Mapa Leaflet */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: #f0f0f0; /* Cor de fundo enquanto carrega */
+}
+
+/* Esconder controles padrão do Leaflet para visual limpo */
+.leaflet-control-zoom, .leaflet-control-attribution {
+  display: none !important;
+}
+
+/* Pinos Personalizados via CSS */
+.custom-marker-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50% 50% 50% 0;
+  background: #3B82F6;
+  position: absolute;
+  transform: rotate(-45deg);
+  left: 50%;
+  top: 50%;
+  margin: -15px 0 0 -15px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+  border: 3px solid white;
+}
+.custom-marker-pin::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  margin: 7px 0 0 7px;
+  background: white;
+  position: absolute;
+  border-radius: 50%;
+}
+
+.pin-success { background: #10B981; }
+.pin-failed { background: #EF4444; }
+.pin-current { 
+    background: #0F172A; 
+    transform: scale(1.2) rotate(-45deg); 
+    z-index: 999 !important;
+}
+
+/* Cards */
+.modern-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+.modern-card:active { transform: scale(0.98); }
+
+/* Status */
+.border-l-status-pending { border-left: 5px solid #3B82F6; }
+.border-l-status-success { border-left: 5px solid #10B981; background-color: #F0FDF4; opacity: 0.7; }
+.border-l-status-failed { border-left: 5px solid #EF4444; background-color: #FEF2F2; opacity: 0.7; }
+.border-l-status-partial { border-left: 5px solid #F59E0B; background-color: #FFFBEB; }
+
+/* Botões */
+.btn-action-lg {
+  height: 52px;
+  text-transform: uppercase;
+  font-weight: 800;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.fab-main {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
+}
+
+.toast-anim { animation: slideIn 0.3s ease-out forwards; }
+@keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+'''
+
+# 3. APP.JSX (Lógica de Avanço Corrigida + Leaflet)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -514,3 +661,38 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V31 (FINAL MAP & FLOW) - {APP_NAME}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
+    
+    print("\n📝 Escrevendo arquivos...")
+    for f, c in files_content.items():
+        if os.path.exists(f): 
+            dest = f"{BACKUP_ROOT}/{ts}/{f}"
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(f, dest)
+        d = os.path.dirname(f)
+        if d: os.makedirs(d, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n📦 Revertendo para Leaflet...")
+    subprocess.run("npm install leaflet react-leaflet", shell=True)
+    subprocess.run("npm uninstall maplibre-gl react-map-gl", shell=True)
+    subprocess.run("npx cap sync", shell=True)
+
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V31 Leaflet + CartoDB Map Swap & Logic Fix"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+

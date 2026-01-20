@@ -1,7 +1,7 @@
 {
   "name": "motorista-pro-rota",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,8 +14,8 @@
     "lucide-react": "^0.263.1",
     "papaparse": "^5.4.1",
     "xlsx": "^0.18.5",
-    "leaflet": "^1.9.4",
-    "react-leaflet": "^4.2.1",
+    "maplibre-gl": "^3.6.2",
+    "react-map-gl": "^7.1.7",
     "@capacitor/geolocation": "^5.0.0",
     "@capacitor/local-notifications": "^5.0.0",
     "@capacitor/core": "^5.0.0",
