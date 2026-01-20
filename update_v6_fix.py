@@ -1,4 +1,108 @@
-import React, { useState, useEffect, useRef } from 'react';
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+# --- CONTEÚDO DOS ARQUIVOS ---
+
+files_content = {}
+
+# 1. package.json
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "1.3.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "leaflet-routing-machine": "^3.2.12",
+    "xlsx": "^0.18.5",
+    "@capacitor/geolocation": "^5.0.0",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/cli": "^5.0.0"
+  }
+}'''
+
+# 2. src/index.css
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #f1f5f9;
+  overflow: hidden;
+}
+
+/* --- BOTTOM SHEET --- */
+.bottom-sheet {
+  transition: height 0.3s ease-in-out;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+}
+
+/* --- MARCADORES --- */
+.custom-pin {
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+.pin-success { background-color: #22c55e; }
+.pin-failed { background-color: #ef4444; }
+.pin-active { 
+  background-color: #eab308; 
+  transform: scale(1.2); 
+  border: 3px solid white;
+  z-index: 1000 !important; 
+}
+.user-gps-marker {
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  animation: pulse-blue 2s infinite;
+}
+@keyframes pulse-blue {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+'''
+
+# 3. src/App.jsx
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Navigation, Truck, Check, AlertTriangle, ChevronRight, MapPin, Settings, Play, X, Sliders } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { Geolocation } from '@capacitor/geolocation';
@@ -402,4 +506,60 @@ export default function App() {
 
     </div>
   );
-}
+}'''
+
+# --- FUNÇÕES AUXILIARES ---
+
+def backup_files():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+    print(f"📦 Backup: {backup_dir}")
+    os.makedirs(backup_dir, exist_ok=True)
+    for filename in files_content.keys():
+        if os.path.exists(filename):
+            dest = os.path.join(backup_dir, filename)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(filename, dest)
+
+def update_files():
+    print("\n📝 Atualizando V6 Fix...")
+    for filename, content in files_content.items():
+        # CORREÇÃO AQUI: Só tenta criar pasta se dirname retornar algo
+        directory = os.path.dirname(filename)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+            
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"   ✅ {filename}")
+
+def run_command(command, msg):
+    try:
+        subprocess.run(command, shell=True, check=True)
+        return True
+    except:
+        print(f"❌ {msg}")
+        return False
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V6 FIX - {APP_NAME}")
+    backup_files()
+    update_files()
+    
+    print("\n📦 Instalando Plugins Nativos...")
+    run_command("npm install @capacitor/geolocation", "Install Geo failed")
+    run_command("npx cap sync", "Cap Sync failed")
+
+    print("\n☁️ GitHub Push...")
+    run_command("git add .", "Add failed")
+    run_command('git commit -m "feat: V6 UI e Permissao Fix"', "Commit failed")
+    if run_command("git push origin main", "Push failed"):
+        print("\n✅ SUCESSO! Código enviado.")
+    
+    try: os.remove(__file__) 
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
