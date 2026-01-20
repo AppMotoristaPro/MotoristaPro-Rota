@@ -1,4 +1,112 @@
-import React, { useState, useEffect, useRef } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. REMOVER O PLUGIN PESADO (Routing Machine) DO PACKAGE.JSON
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "1.4.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "xlsx": "^0.18.5",
+    "@capacitor/geolocation": "^5.0.0",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/cli": "^5.0.0"
+  }
+}'''
+
+# 2. CSS PARA CLONAR O GOOGLE MAPS
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Roboto', 'Inter', sans-serif;
+  background-color: #fff;
+  overflow: hidden;
+}
+
+/* Esconder créditos do mapa para visual limpo (Google Style) */
+.leaflet-control-attribution { display: none !important; }
+.leaflet-control-zoom { display: none !important; }
+
+/* Marcadores */
+.custom-pin {
+  background-color: #EA4335; /* Vermelho Google */
+  border: 2px solid white;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  font-size: 13px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+}
+.pin-success { background-color: #34A853; } /* Verde Google */
+.pin-failed { background-color: #FBBC05; border-color: #fff; color: #333; } /* Amarelo Google */
+.pin-active { 
+  background-color: #4285F4; /* Azul Google */
+  transform: scale(1.3); 
+  border: 3px solid white;
+  z-index: 9999 !important;
+}
+
+/* GPS DO USUÁRIO */
+.user-gps-dot {
+  background-color: #4285F4;
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 10px rgba(66, 133, 244, 0.2);
+}
+
+/* BOTTOM SHEET GOOGLE STYLE */
+.google-sheet {
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  transition: height 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* BARRA DE BUSCA FLUTUANTE */
+.google-search-bar {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+'''
+
+# 3. APP.JSX (LÓGICA OTIMIZADA + VISUAL GOOGLE)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Navigation, Check, AlertTriangle, ChevronRight, MapPin, Settings, X, Sliders, Menu, Search, User, Trash2, Locate } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMap, Polyline } from 'react-leaflet';
 import { Geolocation } from '@capacitor/geolocation';
@@ -304,4 +412,39 @@ export default function App() {
       )}
     </div>
   );
-}
+}'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V9 FIX (Google Style) - {APP_NAME}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_base = f"{BACKUP_ROOT}/{ts}"
+    os.makedirs(backup_base, exist_ok=True)
+    
+    print("\n📝 Escrevendo arquivos...")
+    for f, c in files_content.items():
+        # Lógica de Backup Corrigida
+        if os.path.exists(f): 
+            dest = f"{backup_base}/{f}"
+            dest_dir = os.path.dirname(dest)
+            if dest_dir: os.makedirs(dest_dir, exist_ok=True)
+            shutil.copy(f, dest)
+        
+        # Lógica de Escrita
+        dir_name = os.path.dirname(f)
+        if dir_name: os.makedirs(dir_name, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V9 Google Maps Clone UI + No Lag Fix"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    # Autodestruição
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
