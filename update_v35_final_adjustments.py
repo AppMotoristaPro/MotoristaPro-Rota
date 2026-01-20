@@ -4,53 +4,59 @@ import subprocess
 
 # --- CONFIGURAÇÕES ---
 APP_NAME = "MotoristaPro-Rota"
-# Mantendo a chave que você forneceu anteriormente
 GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
 files_content = {}
 
-# 1. APP.JSX (Lógica de Mapa com InfoWindow e Dados Estruturados)
-files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef } from 'react';
+# 1. APP.JSX (Ajustes de Texto, Mapa e Cálculo)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
   ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
-import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, MarkerF } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v34_final_structure';
+const DB_KEY = 'mp_db_v35_adjustments';
 const GOOGLE_KEY = "__GOOGLE_KEY__";
 
-// --- HELPERS VISUAIS ---
+// --- HELPERS VISUAIS GOOGLE ---
 const getMarkerIcon = (status, isCurrent) => {
-    // SVG Path (Pino Gota)
+    // SVG Path do pino padrao
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     
     let fillColor = "#3B82F6"; // Azul (Pendente)
-    if (status === 'success') fillColor = "#10B981"; // Verde
-    if (status === 'failed') fillColor = "#EF4444"; // Vermelho
-    if (status === 'partial') fillColor = "#F59E0B"; // Laranja
-    if (isCurrent) fillColor = "#0F172A"; // Preto (Foco)
+    
+    if (status === 'success') fillColor = "#10B981"; // Verde (Entregue)
+    if (status === 'failed') fillColor = "#EF4444"; // Vermelho (Falha)
+    if (status === 'partial') fillColor = "#F59E0B"; // Laranja (Parcial)
+    
+    // Se for o atual, destaca em Preto
+    if (isCurrent) fillColor = "#0F172A";
 
     return {
         path: path,
         fillColor: fillColor,
         fillOpacity: 1,
-        strokeWeight: 2,
+        strokeWeight: 1.5, // Borda mais fina
         strokeColor: "#FFFFFF",
-        scale: 2.5, // Maior para caber o número
-        anchor: { x: 12, y: 22 },
-        labelOrigin: { x: 12, y: 10 } // Centraliza o número no "bulbo" do pino
+        // AJUSTE 1: Pinos Menores
+        scale: isCurrent ? 1.8 : 1.2, // Reduzido de 2.0/1.5 para 1.8/1.2
+        anchor: { x: 12, y: 22 }
     };
 };
 
 const mapContainerStyle = { width: '100%', height: '100%' };
+
 const mapOptions = {
     disableDefaultUI: true,
     zoomControl: false,
+    streetViewControl: false,
+    mapTypeControl: false,
+    fullscreenControl: false,
     clickableIcons: false
 };
 
@@ -60,8 +66,7 @@ const groupStopsByStopName = (stops) => {
     const groups = {};
     
     stops.forEach(stop => {
-        // A "Parada" vem da coluna STOP. Se vazia, usa 'Sem Nome'
-        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
+        const rawName = stop.name ? String(stop.name) : 'Sem Nome';
         const key = rawName.trim().toLowerCase();
 
         if (!groups[key]) {
@@ -69,7 +74,7 @@ const groupStopsByStopName = (stops) => {
                 id: key,
                 lat: stop.lat,
                 lng: stop.lng,
-                mainName: rawName, // Nome da Parada
+                mainName: rawName,
                 mainAddress: stop.address,
                 items: [],
                 status: 'pending'
@@ -82,7 +87,7 @@ const groupStopsByStopName = (stops) => {
     const seenKeys = new Set();
 
     stops.forEach(stop => {
-        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
+        const rawName = stop.name ? String(stop.name) : 'Sem Nome';
         const key = rawName.trim().toLowerCase();
         
         if (!seenKeys.has(key)) {
@@ -103,19 +108,25 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-const calculateMetrics = (stops, userPos) => {
+// AJUSTE 4: Tempo Estimado (Somente Navegação)
+const calculateRemainingMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
+    
     const pendingStops = stops.filter(s => s.status === 'pending');
     
+    // Se acabou, retorna zero
+    if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
+
     let totalKm = 0;
-    let currentLat = userPos ? userPos.lat : (pendingStops[0]?.lat || 0);
-    let currentLng = userPos ? userPos.lng : (pendingStops[0]?.lng || 0);
+    let currentLat = userPos ? userPos.lat : pendingStops[0].lat;
+    let currentLng = userPos ? userPos.lng : pendingStops[0].lng;
 
     const calcDist = (lat1, lon1, lat2, lon2) => {
         const R = 6371; 
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
         return R * c;
     };
@@ -126,14 +137,21 @@ const calculateMetrics = (stops, userPos) => {
         currentLng = stop.lng;
     });
 
-    const realKm = totalKm * 1.6; 
-    const avgSpeed = 18; 
-    const serviceTime = pendingStops.length * 4; 
-    const totalMin = (realKm / avgSpeed * 60) + serviceTime;
+    // Fator de rota real (ruas não são retas)
+    const realKm = totalKm * 1.5; 
     
+    // Velocidade Média Urbana (considerando transito leve)
+    const avgSpeed = 25; // km/h
+    
+    // REMOVIDO: serviceTime (Tempo de parada). Agora é só tempo de roda.
+    const totalMin = (realKm / avgSpeed * 60);
+    
+    const h = Math.floor(totalMin / 60);
+    const m = Math.floor(totalMin % 60);
+
     return { 
         km: realKm.toFixed(1), 
-        time: `${Math.floor(totalMin / 60)}h ${Math.floor(totalMin % 60)}m`, 
+        time: `${h}h ${m}m`, 
         remainingPackages: pendingStops.length 
     };
 };
@@ -147,12 +165,18 @@ export default function App() {
   const [userPos, setUserPos] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [toast, setToast] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
-  const [selectedMarkerId, setSelectedMarkerId] = useState(null); // ID do grupo selecionado no mapa
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [customStartAddr, setCustomStartAddr] = useState('');
+  const [isGeocoding, setIsGeocoding] = useState(false);
 
-  // Google Loader
-  const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: GOOGLE_KEY
+  });
+  
   const [mapInstance, setMapInstance] = useState(null);
 
   useEffect(() => {
@@ -166,6 +190,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(DB_KEY, JSON.stringify(routes));
   }, [routes]);
+
+  const showToast = (msg, type = 'success') => {
+      setToast({ msg, type });
+      setTimeout(() => setToast(null), 2000);
+  };
 
   const getCurrentLocation = async (force = false) => {
       try {
@@ -195,14 +224,12 @@ export default function App() {
         const norm = data.map((r, i) => {
             const k = {};
             Object.keys(r).forEach(key => k[String(key).trim().toLowerCase()] = r[key]);
-            
-            // Mapeamento Explícito
+            const safeString = (val) => val ? String(val) : '';
             return {
                 id: Date.now() + i + Math.random(),
-                // COLUNA STOP -> vira NOME DA PARADA
-                stopName: String(k['stop'] || k['parada'] || k['cliente'] || `Parada ${i+1}`),
-                recipient: String(k['recebedor'] || k['contato'] || k['responsavel'] || 'Recebedor'),
-                address: String(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
+                name: safeString(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
+                recipient: safeString(k['recebedor'] || k['contato'] || k['cliente'] || 'Recebedor'),
+                address: safeString(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
                 lng: parseFloat(k['longitude'] || k['long'] || k['lng'] || 0),
                 status: 'pending'
@@ -227,12 +254,11 @@ export default function App() {
       }
   };
 
-  const optimizeRoute = async () => {
-      setIsOptimizing(true);
-      let currentPos = userPos;
-      if (!currentPos) currentPos = await getCurrentLocation(true);
-      if (!currentPos) { setIsOptimizing(false); alert("Ative o GPS."); return; }
+  const handleOptimizeClick = () => setShowStartModal(true);
 
+  const runOptimization = (startPos) => {
+      setIsOptimizing(true);
+      setShowStartModal(false);
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
@@ -240,7 +266,7 @@ export default function App() {
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
       let optimized = [];
-      let pointer = currentPos;
+      let pointer = startPos;
 
       while(pending.length > 0) {
           let nearestIdx = -1, minDist = Infinity;
@@ -257,6 +283,27 @@ export default function App() {
       updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...optimized], optimized: true };
       setRoutes(updatedRoutes);
       setIsOptimizing(false);
+      showToast("Rota Otimizada!");
+  };
+
+  const confirmGpsStart = async () => {
+      let pos = userPos;
+      if (!pos) pos = await getCurrentLocation(true);
+      if (pos) runOptimization(pos);
+      else alert("GPS indisponível.");
+  };
+
+  const confirmAddressStart = async () => {
+      if(!customStartAddr) return;
+      setIsGeocoding(true);
+      try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(customStartAddr)}`);
+          const data = await response.json();
+          setIsGeocoding(false);
+          if(data && data.length > 0) {
+              runOptimization({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+          } else { alert("Endereço não encontrado."); }
+      } catch(e) { setIsGeocoding(false); alert("Erro de conexão."); }
   };
 
   const setStatus = (stopId, status) => {
@@ -268,6 +315,7 @@ export default function App() {
       if (stopIndex !== -1) {
           route.stops[stopIndex].status = status;
           setRoutes(updatedRoutes);
+          if (status === 'success') showToast("Entrega OK!");
       }
   };
 
@@ -279,7 +327,6 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
-  // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
@@ -295,16 +342,15 @@ export default function App() {
 
   const metrics = useMemo(() => {
       if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-      return calculateMetrics(activeRoute.stops, userPos);
+      return calculateRemainingMetrics(activeRoute.stops, userPos);
   }, [activeRoute, userPos, routes]);
 
-  // Centraliza mapa apenas na primeira abertura ou otimização
   useEffect(() => {
       if (showMap && isLoaded && mapInstance && nextGroup) {
           mapInstance.panTo({ lat: nextGroup.lat, lng: nextGroup.lng });
-          mapInstance.setZoom(15);
+          mapInstance.setZoom(16);
       }
-  }, [showMap, isLoaded, mapInstance]);
+  }, [nextGroup, showMap, isLoaded, mapInstance]);
 
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
@@ -349,6 +395,16 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
+          {showStartModal && (
+              <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                  <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
+                      <div className="flex justify-between items-center"><h3 className="text-xl font-bold">Partida</h3><button onClick={() => setShowStartModal(false)}><X/></button></div>
+                      <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><div className="text-left"><span className="block font-bold">Usar GPS Atual</span></div></button>
+                      <div className="flex gap-2"><input type="text" className="flex-1 p-3 bg-slate-50 rounded-xl border text-sm" placeholder="Ou digite endereço..." value={customStartAddr} onChange={e => setCustomStartAddr(e.target.value)}/><button onClick={confirmAddressStart} disabled={isGeocoding} className="bg-slate-900 text-white p-3 rounded-xl">{isGeocoding ? <Loader2 className="animate-spin"/> : <Check/>}</button></div>
+                  </div>
+              </div>
+          )}
+
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
@@ -379,7 +435,7 @@ export default function App() {
               
               {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
@@ -395,58 +451,59 @@ export default function App() {
               <div className="flex-1 relative bg-slate-100">
                   {isLoaded ? (
                       <GoogleMap
-                          mapContainerStyle={mapContainerStyle}
+                          mapContainerStyle={{ width: '100%', height: '100%' }}
                           center={userPos || { lat: -23.55, lng: -46.63 }}
                           zoom={15}
-                          options={mapOptions}
+                          options={{
+                              disableDefaultUI: true,
+                              zoomControl: false,
+                              clickableIcons: false
+                          }}
                           onLoad={(map) => setMapInstance(map)}
                       >
-                          {groupedStops.map((g, idx) => {
-                              const isNext = nextGroup && g.id === nextGroup.id;
-                              if (!isNext && g.status !== 'pending' && g.status !== 'partial') return null;
-                              return (
-                                  <MarkerF 
-                                    key={g.id} 
-                                    position={{ lat: g.lat, lng: g.lng }}
-                                    label={{ text: String(idx + 1), color: "white", fontWeight: "bold", fontSize: "12px", className: "map-label" }}
-                                    icon={getMarkerIcon(g.status, isNext)}
-                                    onClick={() => setSelectedMarkerId(g.id)}
-                                  >
-                                    {selectedMarkerId === g.id && (
-                                        <InfoWindowF onCloseClick={() => setSelectedMarkerId(null)}>
-                                            <div className="p-1 min-w-[200px]">
-                                                <h3 className="font-bold text-sm mb-1">{g.mainName}</h3>
-                                                <p className="text-xs text-gray-600 mb-2">{g.mainAddress}</p>
-                                                <div className="text-xs font-bold text-blue-600 mb-2">{g.items.length} pacotes</div>
-                                                <button onClick={() => openNav(g.lat, g.lng)} className="w-full bg-blue-600 text-white py-2 rounded font-bold text-xs">NAVEGAR AQUI</button>
-                                            </div>
-                                        </InfoWindowF>
-                                    )}
-                                  </MarkerF>
-                              )
-                          })}
+                          {groupedStops.map(g => (
+                              <MarkerF 
+                                key={g.id} 
+                                position={{ lat: g.lat, lng: g.lng }}
+                                // AJUSTE 3: Pinos Persistentes (Removido filtro de 'sucesso')
+                                icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
+                                onClick={() => openNav(g.lat, g.lng)}
+                              />
+                          ))}
                           {userPos && <MarkerF position={{ lat: userPos.lat, lng: userPos.lng }} icon={getMarkerIcon('current', true)} />}
                       </GoogleMap>
                   ) : <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin"/></div>}
+                  
+                  {nextGroup && (
+                      <div className="absolute bottom-6 left-4 right-4 bg-white p-4 rounded-xl shadow-xl z-[1000]">
+                          {/* AJUSTE 2: Título do Card */}
+                          <h3 className="font-bold truncate">Parada: {nextGroup.mainName}</h3>
+                          {/* AJUSTE 2: Subtítulo */}
+                          <p className="text-xs text-slate-500 mb-2">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
+                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} className="w-full btn-gradient-green py-3 rounded-lg font-bold text-white">Navegar</button>
+                      </div>
+                  )}
               </div>
           ) : (
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
                   {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
-                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMA PARADA</div>
-                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{nextGroup.mainName}</h3>
-                          <p className="text-sm text-slate-500 mb-4">{nextGroup.mainAddress}</p>
+                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
+                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {nextGroup.mainName}</h3>
+                          <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
                           <div className="space-y-3 border-t border-slate-100 pt-3">
                               {nextGroup.items.map((item, idx) => {
                                   if (item.status !== 'pending') return null;
                                   return (
                                       <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                          <div className="mb-2">
-                                              <span className="text-xs font-bold text-blue-600 block mb-1">ENDEREÇO</span>
+                                          <div className="mb-3">
+                                              <span className="text-xs font-bold text-blue-600 block mb-1">PACOTE #{idx + 1}</span>
                                               <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
-                                              <span className="text-[10px] text-slate-400 block mt-1">Ref: {item.recipient}</span>
                                           </div>
-                                          <div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-xl">Não Entregue</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-xl shadow-md">ENTREGUE</button></div>
+                                          <div className="flex gap-2 w-full">
+                                              <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg btn-outline-red rounded-xl">Não Entregue</button>
+                                              <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg btn-gradient-green rounded-xl text-white shadow-md">ENTREGUE</button>
+                                          </div>
                                       </div>
                                   )
                               })}
@@ -454,7 +511,7 @@ export default function App() {
                       </div>
                   )}
 
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Lista de Paradas</h4>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Lista</h4>
                   {filteredGroups.map((group, idx) => {
                       if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
                       const isExpanded = expandedGroups[group.id];
@@ -463,10 +520,12 @@ export default function App() {
                       return (
                           <div key={group.id} className={`modern-card overflow-hidden ${statusClass} ${group.status !== 'pending' && !searchQuery ? 'opacity-60 grayscale' : ''}`}>
                               <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
-                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{idx + 1}</div>
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : (idx + 1)}</div>
                                   <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">PARADA #{idx + 1}: {group.mainName}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div>
-                                      <p className="text-xs text-slate-400 truncate">{group.mainAddress}</p>
+                                      {/* AJUSTE 2: Título do Card na Lista */}
+                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {group.mainName}</h4></div>
+                                      {/* AJUSTE 2: Subtítulo do Card na Lista */}
+                                      <p className="text-xs text-slate-400 truncate">{group.items.length} pacotes a serem entregues nessa parada</p>
                                   </div>
                                   {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 rounded-full"><Check size={18}/></button>)}
                               </div>
@@ -474,10 +533,7 @@ export default function App() {
                                   <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
                                       {group.items.map((item, subIdx) => (
                                           <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                              <div className="mb-2">
-                                                  <span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span>
-                                                  <span className="text-sm font-bold text-slate-700 block">{item.address}</span>
-                                              </div>
+                                              <div className="mb-2"><span className="text-[10px] font-bold text-blue-500 block">PACOTE #{subIdx + 1}</span><span className="text-sm font-bold text-slate-700 block">{item.address}</span></div>
                                               {item.status === 'pending' ? (<div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button></div>) : (<span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>)}
                                           </div>
                                       ))}
@@ -495,18 +551,18 @@ export default function App() {
 '''
 
 def main():
-    print(f"🚀 ATUALIZAÇÃO V34 (FINAL MAP & DATA) - {APP_NAME}")
+    print(f"🚀 ATUALIZAÇÃO V35 (FINAL ADJUSTMENTS) - {APP_NAME}")
     
-    # 1. Substituir a chave no código
+    # Substituir a chave no código
     final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
     
     print("\n📝 Atualizando App.jsx...")
     with open("src/App.jsx", 'w', encoding='utf-8') as f:
         f.write(final_app_jsx)
-        
+
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "feat: V34 Pin Labels & Explicit Address vs Stop Logic"', shell=True)
+    subprocess.run('git commit -m "feat: V35 UI Text Update, Smaller Pins & Calc Fix"', shell=True)
     subprocess.run("git push origin main", shell=True)
     
     try: os.remove(__file__)
