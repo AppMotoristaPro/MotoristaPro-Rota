@@ -8,7 +8,7 @@ GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
 files_content = {}
 
-# 1. APP.JSX (Ajustes de Texto, Mapa e Cálculo)
+# 1. APP.JSX (Lógica de Mapa com InfoWindow, Números e Tempo Ajustado)
 files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
@@ -16,15 +16,15 @@ import {
   ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
-import { GoogleMap, useJsApiLoader, MarkerF } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v35_adjustments';
+const DB_KEY = 'mp_db_v36_final_v2';
 const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS VISUAIS GOOGLE ---
-const getMarkerIcon = (status, isCurrent) => {
+const getMarkerIcon = (status, isCurrent, labelText) => {
     // SVG Path do pino padrao
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     
@@ -43,9 +43,9 @@ const getMarkerIcon = (status, isCurrent) => {
         fillOpacity: 1,
         strokeWeight: 1.5, // Borda mais fina
         strokeColor: "#FFFFFF",
-        // AJUSTE 1: Pinos Menores
-        scale: isCurrent ? 1.8 : 1.2, // Reduzido de 2.0/1.5 para 1.8/1.2
-        anchor: { x: 12, y: 22 }
+        scale: isCurrent ? 2.2 : 1.8, 
+        anchor: { x: 12, y: 22 },
+        labelOrigin: { x: 12, y: 10 } // Posição do número
     };
 };
 
@@ -66,7 +66,7 @@ const groupStopsByStopName = (stops) => {
     const groups = {};
     
     stops.forEach(stop => {
-        const rawName = stop.name ? String(stop.name) : 'Sem Nome';
+        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
         const key = rawName.trim().toLowerCase();
 
         if (!groups[key]) {
@@ -87,7 +87,7 @@ const groupStopsByStopName = (stops) => {
     const seenKeys = new Set();
 
     stops.forEach(stop => {
-        const rawName = stop.name ? String(stop.name) : 'Sem Nome';
+        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
         const key = rawName.trim().toLowerCase();
         
         if (!seenKeys.has(key)) {
@@ -108,7 +108,7 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-// AJUSTE 4: Tempo Estimado (Somente Navegação)
+// AJUSTE 4: Tempo Estimado (Trajeto + 1m30s por pacote)
 const calculateRemainingMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
     
@@ -140,11 +140,15 @@ const calculateRemainingMetrics = (stops, userPos) => {
     // Fator de rota real (ruas não são retas)
     const realKm = totalKm * 1.5; 
     
-    // Velocidade Média Urbana (considerando transito leve)
+    // Velocidade Média Urbana
     const avgSpeed = 25; // km/h
     
-    // REMOVIDO: serviceTime (Tempo de parada). Agora é só tempo de roda.
-    const totalMin = (realKm / avgSpeed * 60);
+    // AJUSTE 4: 1.5 minutos (1m30s) por pacote
+    const serviceTimePerPackage = 1.5;
+    const serviceTimeTotal = pendingStops.length * serviceTimePerPackage;
+    
+    const travelTimeMin = (realKm / avgSpeed * 60);
+    const totalMin = travelTimeMin + serviceTimeTotal;
     
     const h = Math.floor(totalMin / 60);
     const m = Math.floor(totalMin % 60);
@@ -171,6 +175,9 @@ export default function App() {
   const [showStartModal, setShowStartModal] = useState(false);
   const [customStartAddr, setCustomStartAddr] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
+  
+  // Estado para InfoWindow do Mapa
+  const [selectedMarker, setSelectedMarker] = useState(null);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -224,12 +231,13 @@ export default function App() {
         const norm = data.map((r, i) => {
             const k = {};
             Object.keys(r).forEach(key => k[String(key).trim().toLowerCase()] = r[key]);
-            const safeString = (val) => val ? String(val) : '';
+            
             return {
                 id: Date.now() + i + Math.random(),
-                name: safeString(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
-                recipient: safeString(k['recebedor'] || k['contato'] || k['cliente'] || 'Recebedor'),
-                address: safeString(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
+                name: String(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
+                stopName: String(k['stop'] || k['parada'] || `Parada ${i+1}`), // Coluna STOP explícita
+                recipient: String(k['recebedor'] || k['contato'] || k['cliente'] || 'Recebedor'),
+                address: String(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
                 lng: parseFloat(k['longitude'] || k['long'] || k['lng'] || 0),
                 status: 'pending'
@@ -327,8 +335,12 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
+  // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
+  
+  // AJUSTE 3: Destaque Automático
+  // Sempre pega o primeiro grupo que tem status 'pending' ou 'partial'
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
   const filteredGroups = useMemo(() => {
@@ -345,6 +357,7 @@ export default function App() {
       return calculateRemainingMetrics(activeRoute.stops, userPos);
   }, [activeRoute, userPos, routes]);
 
+  // Atualizar mapa quando nextGroup muda
   useEffect(() => {
       if (showMap && isLoaded && mapInstance && nextGroup) {
           mapInstance.panTo({ lat: nextGroup.lat, lng: nextGroup.lng });
@@ -352,6 +365,7 @@ export default function App() {
       }
   }, [nextGroup, showMap, isLoaded, mapInstance]);
 
+  // VIEWS
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
           <div className="flex justify-between items-center mb-8">
@@ -395,6 +409,7 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
+          {{/* MODAL OTIMIZAÇÃO */}}
           {showStartModal && (
               <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                   <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
@@ -405,6 +420,7 @@ export default function App() {
               </div>
           )}
 
+          {{/* HEADER */}}
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
@@ -447,49 +463,65 @@ export default function App() {
               )}
           </div>
 
+          {{/* CONTEÚDO */}}
           {showMap ? (
               <div className="flex-1 relative bg-slate-100">
                   {isLoaded ? (
                       <GoogleMap
-                          mapContainerStyle={{ width: '100%', height: '100%' }}
+                          mapContainerStyle={mapContainerStyle}
                           center={userPos || { lat: -23.55, lng: -46.63 }}
                           zoom={15}
-                          options={{
-                              disableDefaultUI: true,
-                              zoomControl: false,
-                              clickableIcons: false
-                          }}
+                          options={mapOptions}
                           onLoad={(map) => setMapInstance(map)}
                       >
-                          {groupedStops.map(g => (
+                          {groupedStops.map((g, idx) => (
                               <MarkerF 
                                 key={g.id} 
                                 position={{ lat: g.lat, lng: g.lng }}
-                                // AJUSTE 3: Pinos Persistentes (Removido filtro de 'sucesso')
+                                // AJUSTE 1: Label com Número e Ícones Menores
+                                label={{
+                                    text: String(idx + 1),
+                                    color: "white",
+                                    fontSize: "12px",
+                                    fontWeight: "bold",
+                                    className: "map-label"
+                                }}
                                 icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
-                                onClick={() => openNav(g.lat, g.lng)}
+                                onClick={() => setSelectedMarker(g)}
                               />
                           ))}
                           {userPos && <MarkerF position={{ lat: userPos.lat, lng: userPos.lng }} icon={getMarkerIcon('current', true)} />}
+
+                          {/* AJUSTE 2: InfoWindow ao Clicar */}
+                          {selectedMarker && (
+                            <InfoWindowF
+                                position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }}
+                                onCloseClick={() => setSelectedMarker(null)}
+                            >
+                                <div className="p-2 min-w-[200px]">
+                                    <h3 className="font-bold text-slate-900 text-sm mb-1">{selectedMarker.mainName}</h3>
+                                    <p className="text-xs text-slate-500 mb-2">{selectedMarker.mainAddress}</p>
+                                    <div className="text-xs font-bold text-blue-600 mb-3">{selectedMarker.items.length} pacotes</div>
+                                    <button 
+                                        onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)}
+                                        className="w-full bg-blue-600 text-white py-2 rounded text-xs font-bold"
+                                    >
+                                        NAVEGAR AQUI
+                                    </button>
+                                </div>
+                            </InfoWindowF>
+                          )}
                       </GoogleMap>
                   ) : <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin"/></div>}
-                  
-                  {nextGroup && (
-                      <div className="absolute bottom-6 left-4 right-4 bg-white p-4 rounded-xl shadow-xl z-[1000]">
-                          {/* AJUSTE 2: Título do Card */}
-                          <h3 className="font-bold truncate">Parada: {nextGroup.mainName}</h3>
-                          {/* AJUSTE 2: Subtítulo */}
-                          <p className="text-xs text-slate-500 mb-2">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} className="w-full btn-gradient-green py-3 rounded-lg font-bold text-white">Navegar</button>
-                      </div>
-                  )}
               </div>
           ) : (
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
                   {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
-                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
+                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
+                          {/* AJUSTE 2: Título do Card */}
                           <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {nextGroup.mainName}</h3>
+                          {/* AJUSTE 2: Subtítulo */}
                           <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
                           <div className="space-y-3 border-t border-slate-100 pt-3">
                               {nextGroup.items.map((item, idx) => {
@@ -523,7 +555,7 @@ export default function App() {
                                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : (idx + 1)}</div>
                                   <div className="flex-1 min-w-0">
                                       {/* AJUSTE 2: Título do Card na Lista */}
-                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {group.mainName}</h4></div>
+                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {group.mainName}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div>
                                       {/* AJUSTE 2: Subtítulo do Card na Lista */}
                                       <p className="text-xs text-slate-400 truncate">{group.items.length} pacotes a serem entregues nessa parada</p>
                                   </div>
@@ -551,18 +583,18 @@ export default function App() {
 '''
 
 def main():
-    print(f"🚀 ATUALIZAÇÃO V35 (FINAL ADJUSTMENTS) - {APP_NAME}")
+    print(f"🚀 ATUALIZAÇÃO V36 FINAL V2 (STRING FIX) - {APP_NAME}")
     
-    # Substituir a chave no código
+    # 1. Substituir a chave no código
     final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
     
-    print("\n📝 Atualizando App.jsx...")
+    print("\n📝 Atualizando App.jsx com Google Maps API...")
     with open("src/App.jsx", 'w', encoding='utf-8') as f:
         f.write(final_app_jsx)
-
+        
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "feat: V35 UI Text Update, Smaller Pins & Calc Fix"', shell=True)
+    subprocess.run('git commit -m "fix: V36 Final V2 Adjustments - InfoWindow and Metrics"', shell=True)
     subprocess.run("git push origin main", shell=True)
     
     try: os.remove(__file__)
