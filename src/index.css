@@ -5,45 +5,44 @@
 body {
   margin: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #F3F4F6; /* Cinza muito suave */
-  color: #1F2937;
+  background-color: #F8FAFC;
+  color: #0F172A;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Scrollbar escondida para visual clean */
-::-webkit-scrollbar {
-  display: none;
-}
-
-/* Card Moderno */
+/* Card Base */
 .modern-card {
   background: white;
   border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0,0,0,0.02);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+  overflow: hidden;
 }
+
 .modern-card:active {
-  transform: scale(0.98);
+  transform: scale(0.99);
 }
 
-/* Status Indicators */
-.status-indicator {
-  width: 4px;
-  border-radius: 4px;
-  height: 100%;
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
+/* Card Agrupado (Indicador visual) */
+.grouped-card {
+  border-left: 4px solid #3B82F6; /* Azul */
 }
-.indicator-pending { background-color: #3B82F6; } /* Azul */
-.indicator-success { background-color: #10B981; } /* Verde Esmeralda */
-.indicator-failed { background-color: #F59E0B; }  /* Âmbar */
 
-/* Botão Flutuante (FAB) */
-.fab-main {
-  background: #111827; /* Preto suave (Slate 900) */
+/* Botões */
+.btn-highlight {
+  background-color: #2563EB; /* Azul Forte */
   color: white;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.btn-secondary {
+  background-color: #F1F5F9; /* Cinza */
+  color: #64748B;
+}
+
+.fab-main {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
 }
