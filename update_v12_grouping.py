@@ -1,4 +1,77 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. CSS (Estilos para Agrupamento e Métricas)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar { display: none; }
+
+.modern-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0,0,0,0.04);
+  transition: all 0.2s ease;
+}
+
+/* Card Agrupado (Efeito de Pilha) */
+.grouped-card {
+  position: relative;
+  z-index: 10;
+}
+.grouped-card::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  bottom: -4px;
+  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.04);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+  z-index: -1;
+}
+
+.fab-main {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
+}
+
+.btn-primary {
+  background: #2563EB;
+  color: white;
+  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);
+}
+
+.btn-secondary {
+  background: #F1F5F9;
+  color: #475569;
+}
+'''
+
+# 2. APP.JSX (Nova Lógica de Agrupamento e Métricas)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
 import { Upload, Navigation, Check, AlertTriangle, Trash2, Plus, ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, ChevronUp, Box, Gauge } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -424,3 +497,33 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V12 (Logistics Master) - {APP_NAME}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
+    
+    print("\n📝 Atualizando arquivos...")
+    for f, c in files_content.items():
+        if os.path.exists(f): 
+            dest = f"{BACKUP_ROOT}/{ts}/{f}"
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(f, dest)
+        d = os.path.dirname(f)
+        if d: os.makedirs(d, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V12 Grouping, Metrics & UX Flow"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
