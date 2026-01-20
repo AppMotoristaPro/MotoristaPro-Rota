@@ -28,11 +28,15 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
+      
+      # REMOVE PLATAFORMA ANTIGA SE EXISTIR
+      - name: Clean Android Platform
+        run: rm -rf android
         
       - name: Add Android Platform
         run: npx cap add android
       
-      # INJETAR PERMISSÕES NO ANDROID MANIFEST VIA SED
+      # INJETAR PERMISSÕES NO ANDROID MANIFEST
       - name: Inject Android Permissions
         run: |
           sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" \/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" \/><uses-feature android:name="android.hardware.location.gps" \/><\/manifest>/' android/app/src/main/AndroidManifest.xml

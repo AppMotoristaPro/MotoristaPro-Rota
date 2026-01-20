@@ -14,7 +14,6 @@ const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
 // --- HELPERS VISUAIS GOOGLE ---
 const getMarkerIcon = (status, isCurrent) => {
-    // SVG Path do pino padrao
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; // Azul
     if (status === 'success') fillColor = "#10B981"; // Verde

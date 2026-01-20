@@ -2,13 +2,13 @@ import os
 import subprocess
 
 # --- CONFIGURAÇÕES ---
-APP_NAME = "MotoristaPro-Rota"  # Variável que faltava
+APP_NAME = "MotoristaPro-Rota"
 GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
 files_content = {}
 
-# CONTEÚDO DO APP.JSX
-# Usamos r''' para que o Python não interprete chaves {} como formatação de string
+# 1. APP.JSX CORRIGIDO (Sintaxe JSX Correta)
+# Usamos r''' raw string para evitar que o Python interprete {}
 # Substituiremos __GOOGLE_KEY__ manualmente depois.
 files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
@@ -26,7 +26,6 @@ const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS VISUAIS GOOGLE ---
 const getMarkerIcon = (status, isCurrent) => {
-    // SVG Path do pino padrao
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; // Azul
     if (status === 'success') fillColor = "#10B981"; // Verde
@@ -528,10 +527,77 @@ def main():
     print("\n📝 Atualizando App.jsx com Google Maps API...")
     with open("src/App.jsx", 'w', encoding='utf-8') as f:
         f.write(final_app_jsx)
-    
+        
     # Escrever outros arquivos se necessário (como index.css e package.json)
     # Mas o erro principal estava na formatação do JSX dentro do Python
-    
+    files_to_write = ['src/index.css', 'package.json'] # Incluir arquivos restantes
+    for f in files_to_write:
+        if f in files_content:
+            with open(f, 'w', encoding='utf-8') as file: file.write(files_content[f])
+            print(f"   ✅ {f}")
+
+    # Atualizar o arquivo de workflow para garantir limpeza antes de npx cap add android
+    workflow_content = r'''name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install Dependencies
+        run: npm install
+        
+      - name: Build Web Assets
+        run: npm run build
+        
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      # REMOVE PLATAFORMA ANTIGA SE EXISTIR
+      - name: Clean Android Platform
+        run: rm -rf android
+        
+      - name: Add Android Platform
+        run: npx cap add android
+      
+      # INJETAR PERMISSÕES NO ANDROID MANIFEST
+      - name: Inject Android Permissions
+        run: |
+          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" \/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" \/><uses-feature android:name="android.hardware.location.gps" \/><\/manifest>/' android/app/src/main/AndroidManifest.xml
+          cat android/app/src/main/AndroidManifest.xml
+        
+      - name: Sync Capacitor
+        run: npx cap sync
+        
+      - name: Build APK (Debug)
+        working-directory: android
+        run: ./gradlew assembleDebug
+        
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotoristaPro-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+'''
+    print("\n📝 Atualizando workflow para limpeza de plataforma...")
+    with open(".github/workflows/build.yml", 'w', encoding='utf-8') as f:
+        f.write(workflow_content)
+
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
     subprocess.run('git commit -m "fix: V33 Final Build Fix with App Name Defined"', shell=True)
@@ -542,5 +608,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
