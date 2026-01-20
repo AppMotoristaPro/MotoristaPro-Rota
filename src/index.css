@@ -5,14 +5,16 @@
 body {
   margin: 0;
   font-family: 'Inter', sans-serif;
-  background-color: #f1f5f9;
-  overflow: hidden;
+  background-color: #f8fafc;
+  overflow: hidden; /* Impede scroll da página inteira */
 }
 
 /* --- BOTTOM SHEET --- */
 .bottom-sheet {
-  transition: height 0.3s ease-in-out;
-  box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 -4px 25px rgba(0,0,0,0.1);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
 }
 
 /* --- MARCADORES --- */
@@ -28,22 +30,30 @@ body {
   justify-content: center;
   box-shadow: 0 4px 6px rgba(0,0,0,0.3);
 }
-.pin-success { background-color: #22c55e; }
-.pin-failed { background-color: #ef4444; }
+.pin-success { background-color: #22c55e; border-color: #f0fdf4; }
+.pin-failed { background-color: #ef4444; border-color: #fef2f2; }
 .pin-active { 
   background-color: #eab308; 
-  transform: scale(1.2); 
+  transform: scale(1.3); 
   border: 3px solid white;
-  z-index: 1000 !important; 
+  z-index: 1000 !important;
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.5);
 }
+
+/* GPS DO USUÁRIO (PULSO) */
 .user-gps-marker {
-  background-color: #3b82f6;
-  border: 2px solid white;
+  background-color: #2563eb;
+  border: 3px solid white;
   border-radius: 50%;
-  animation: pulse-blue 2s infinite;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
+  animation: pulse 2s infinite;
 }
-@keyframes pulse-blue {
-  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
-  70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
+
+/* Ocultar Leaflet Controls padrão que atrapalham no mobile */
+.leaflet-routing-container { display: none !important; }
+.leaflet-control-zoom { display: none !important; }

@@ -1,4 +1,79 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. ATUALIZAR CSS (Melhorias no Bottom Sheet e Marcadores)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #f8fafc;
+  overflow: hidden; /* Impede scroll da página inteira */
+}
+
+/* --- BOTTOM SHEET --- */
+.bottom-sheet {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 -4px 25px rgba(0,0,0,0.1);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+}
+
+/* --- MARCADORES --- */
+.custom-pin {
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+.pin-success { background-color: #22c55e; border-color: #f0fdf4; }
+.pin-failed { background-color: #ef4444; border-color: #fef2f2; }
+.pin-active { 
+  background-color: #eab308; 
+  transform: scale(1.3); 
+  border: 3px solid white;
+  z-index: 1000 !important;
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.5);
+}
+
+/* GPS DO USUÁRIO (PULSO) */
+.user-gps-marker {
+  background-color: #2563eb;
+  border: 3px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+}
+
+/* Ocultar Leaflet Controls padrão que atrapalham no mobile */
+.leaflet-routing-container { display: none !important; }
+.leaflet-control-zoom { display: none !important; }
+'''
+
+# 2. APP.JSX (Lógica V8: Persistência, Navigation Mode, Bottom Sheet Fix)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Upload, Navigation, Truck, Check, AlertTriangle, ChevronRight, MapPin, Settings, X, Sliders, Trash2, Crosshair } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import { Geolocation } from '@capacitor/geolocation';
@@ -488,4 +563,49 @@ export default function App() {
 
     </div>
   );
-}
+}'''
+
+# --- FUNÇÕES ---
+def backup_files():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+    print(f"📦 Backup: {backup_dir}")
+    os.makedirs(backup_dir, exist_ok=True)
+    for filename in files_content.keys():
+        if os.path.exists(filename):
+            dest = os.path.join(backup_dir, filename)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(filename, dest)
+
+def update_files():
+    print("\n📝 Atualizando V8 Final...")
+    for filename, content in files_content.items():
+        directory = os.path.dirname(filename)
+        if directory: os.makedirs(directory, exist_ok=True)
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"   ✅ {filename}")
+
+def run_command(command, msg):
+    try: subprocess.run(command, shell=True, check=True); return True
+    except: print(f"❌ {msg}"); return False
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V8 (UX FINAL) - {APP_NAME}")
+    backup_files()
+    update_files()
+    print("\n☁️ GitHub Push...")
+    run_command("git add .", "Add failed")
+    run_command('git commit -m "feat: V8 Persistence, Better Nav & Bottom Sheet Fix"', "Commit failed")
+    if run_command("git push origin main", "Push failed"):
+        print("\n✅ SUCESSO! Código enviado.")
+    
+    try:
+        os.remove(__file__)
+    except:
+        pass
+
+if __name__ == "__main__":
+    main()
+
+
