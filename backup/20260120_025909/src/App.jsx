@@ -1,47 +1,4 @@
-import os
-import shutil
-import subprocess
-from datetime import datetime
-
-# --- CONFIGURAÇÕES ---
-REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
-BACKUP_ROOT = "backup"
-APP_NAME = "MotoristaPro-Rota"
-
-files_content = {}
-
-# 1. CSS (Focado em Listas e Cards, sem mapa)
-files_content['src/index.css'] = '''@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-body {
-  margin: 0;
-  font-family: 'Inter', sans-serif;
-  background-color: #f3f4f6; /* Cinza claro */
-}
-
-/* Animações de Card */
-.route-card {
-  transition: all 0.2s ease;
-}
-.route-card:active {
-  transform: scale(0.98);
-}
-
-/* Status Colors */
-.status-pending { border-left: 4px solid #3b82f6; }
-.status-success { border-left: 4px solid #22c55e; opacity: 0.6; background-color: #f0fdf4; }
-.status-failed { border-left: 4px solid #ef4444; opacity: 0.6; background-color: #fef2f2; }
-
-/* Botão Flutuante Principal */
-.fab {
-  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
-}
-'''
-
-# 2. APP.JSX (Lógica Totalmente Nova - Baseada em Listas)
-files_content['src/App.jsx'] = r'''import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Upload, Navigation, Check, AlertTriangle, Trash2, Plus, MapPin, ChevronRight, Package, ArrowLeft, Sliders, Play } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import Papa from 'papaparse';
@@ -381,35 +338,3 @@ export default function App() {
       </div>
   );
 }
-'''
-
-def main():
-    print(f"🚀 ATUALIZAÇÃO V10 (LIST MODE) - {APP_NAME}")
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_base = f"{BACKUP_ROOT}/{ts}"
-    os.makedirs(backup_base, exist_ok=True)
-    
-    print("\n📝 Escrevendo arquivos...")
-    for f, c in files_content.items():
-        if os.path.exists(f): 
-            dest = f"{backup_base}/{f}"
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            shutil.copy(f, dest)
-        
-        d = os.path.dirname(f)
-        if d: os.makedirs(d, exist_ok=True)
-        with open(f, 'w', encoding='utf-8') as file: file.write(c)
-        print(f"   ✅ {f}")
-        
-    print("\n☁️ Enviando para GitHub...")
-    subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "feat: V10 List Based UI - No Map"', shell=True)
-    subprocess.run("git push origin main", shell=True)
-    
-    try: os.remove(__file__)
-    except: pass
-
-if __name__ == "__main__":
-    main()
-
-

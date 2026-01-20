@@ -1,7 +1,7 @@
 {
   "name": "motorista-pro-rota",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,11 +11,12 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
     "lucide-react": "^0.263.1",
     "papaparse": "^5.4.1",
     "xlsx": "^0.18.5",
     "@capacitor/geolocation": "^5.0.0",
-    "@capacitor/local-notifications": "^5.0.0",
     "@capacitor/core": "^5.0.0",
     "@capacitor/android": "^5.0.0"
   },

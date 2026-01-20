@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #f3f4f6; /* Cinza claro */
+}
+
+/* Animações de Card */
+.route-card {
+  transition: all 0.2s ease;
+}
+.route-card:active {
+  transform: scale(0.98);
+}
+
+/* Status Colors */
+.status-pending { border-left: 4px solid #3b82f6; }
+.status-success { border-left: 4px solid #22c55e; opacity: 0.6; background-color: #f0fdf4; }
+.status-failed { border-left: 4px solid #ef4444; opacity: 0.6; background-color: #fef2f2; }
+
+/* Botão Flutuante Principal */
+.fab {
+  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+}
