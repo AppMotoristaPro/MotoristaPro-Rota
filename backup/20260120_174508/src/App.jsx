@@ -9,7 +9,7 @@ import Map, { Marker, NavigationControl } from 'react-map-gl/maplibre';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v29_flow_perfect';
+const DB_KEY = 'mp_db_v28_stable';
 
 // --- HELPERS ---
 
@@ -106,6 +106,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   
+  // Referência do mapa para controle manual
   const mapRef = useRef(null);
 
   useEffect(() => {
@@ -228,6 +229,7 @@ export default function App() {
           route.stops[stopIndex].status = status;
           setRoutes(updatedRoutes);
           if (status === 'success') showToast("Entregue!", "success");
+          else showToast("Não Entregue", "error");
       }
   };
 
@@ -239,6 +241,7 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
+  // Centraliza o mapa
   const recenterMap = () => {
       if (nextGroup && mapRef.current) {
           mapRef.current.flyTo({
@@ -253,20 +256,18 @@ export default function App() {
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   
-  // LÓGICA CRÍTICA DE FLUXO V29:
-  // O próximo grupo é o primeiro que tem status 'pending' OU 'partial'
-  // Isso garante que se um grupo começou mas não terminou, ele continua sendo o "next"
+  // Próximo grupo pendente/parcial
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
-  // Dentro desse grupo, qual é o próximo item pendente?
+  // Próximo ITEM específico dentro do grupo (para atualizar o cabeçalho)
   const currentItem = nextGroup ? nextGroup.items.find(i => i.status === 'pending') : null;
 
-  // Efeito para centralizar mapa UMA VEZ ao mudar de alvo
+  // Efeito para centralizar mapa UMA VEZ ao mudar de alvo (Estabilidade)
   useEffect(() => {
       if (showMap && nextGroup && mapRef.current) {
           mapRef.current.flyTo({ center: [nextGroup.lng, nextGroup.lat], zoom: 15 });
       }
-  }, [nextGroup?.id, showMap]); 
+  }, [nextGroup?.id, showMap]); // Só roda se o ID do grupo mudar
 
   const filteredGroups = useMemo(() => {
       if (!searchQuery) return groupedStops;
@@ -391,19 +392,23 @@ export default function App() {
                   <Map 
                       ref={mapRef}
                       initialViewState={{
-                          longitude: nextGroup?.lng || -46.63,
-                          latitude: nextGroup?.lat || -23.55,
-                          zoom: 14
+                          longitude: -46.63,
+                          latitude: -23.55,
+                          zoom: 13
                       }}
                       style={{width: '100%', height: '100%'}}
                       mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
                   >
                       <NavigationControl position="top-right" />
+                      
+                      {/* PINO DE DESTAQUE (ALVO) */}
                       {nextGroup && (
                           <Marker longitude={nextGroup.lng} latitude={nextGroup.lat} anchor="bottom">
                               <div className="text-4xl drop-shadow-md">🎯</div>
                           </Marker>
                       )}
+
+                      {/* OUTROS PONTOS */}
                       {groupedStops.map((g) => {
                           if (nextGroup && g.id === nextGroup.id) return null;
                           return (
@@ -414,6 +419,7 @@ export default function App() {
                       })}
                   </Map>
                   
+                  {/* CONTROLE FLUTUANTE MAPA */}
                   {nextGroup && (
                       <div className="absolute bottom-6 left-4 right-4 z-[1000] flex gap-2">
                           <div className="flex-1 bg-white p-4 rounded-xl shadow-xl border border-slate-200">
@@ -431,15 +437,15 @@ export default function App() {
                   {!searchQuery && nextGroup && activeRoute.optimized && currentItem && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-500">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
+                          {/* MOSTRA O ENDEREÇO DO ITEM ATUAL, NÃO DO GRUPO GENÉRICO */}
                           <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{currentItem.address}</h3>
                           <p className="text-sm text-slate-500 mb-4">{currentItem.name} • {currentItem.recipient}</p>
                           
                           <div className="space-y-3 border-t border-slate-100 pt-3">
-                              {/* MOSTRA TODOS DO GRUPO PARA CONTEXTO, MAS DESTACA O ATUAL */}
+                              {/* LISTA FILTRADA: APENAS PENDENTES DO GRUPO */}
                               {nextGroup.items.map(item => {
-                                  // Se já foi finalizado, não mostra no destaque
                                   if (item.status !== 'pending') return null;
-                                  
+                                  // Se for o item atual (primeiro da lista), destaca
                                   const isTopItem = item.id === currentItem.id;
                                   
                                   return (
@@ -452,8 +458,8 @@ export default function App() {
                                           
                                           {isTopItem && (
                                               <div className="flex gap-2 w-full">
-                                                  <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={18} className="mb-1"/> Não Entregue</button>
-                                                  <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={20} className="mb-1"/> ENTREGUE</button>
+                                                  <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={20} className="mb-1"/> Falha</button>
+                                                  <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={24} className="mb-1"/> ENTREGUE</button>
                                               </div>
                                           )}
                                       </div>

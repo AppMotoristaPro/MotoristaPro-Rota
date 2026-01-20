@@ -10,7 +10,7 @@ APP_NAME = "MotoristaPro-Rota"
 
 files_content = {}
 
-# 1. CSS (Ajuste fino no mapa)
+# 1. CSS (MapLibre CSS + Animações)
 files_content['src/index.css'] = '''@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -24,7 +24,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* O mapa agora respeita limites para não pular */
+/* Otimização do Mapa */
 .map-container {
   width: 100%;
   height: 100%;
@@ -36,22 +36,22 @@ body {
 .modern-card {
   background: white;
   border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border: 1px solid rgba(0,0,0,0.05);
-  transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
 }
-.modern-card:active { transform: scale(0.99); }
+.modern-card:active { transform: scale(0.98); }
 
 /* Cores de Status */
 .border-l-status-pending { border-left: 5px solid #3B82F6; }
-.border-l-status-success { border-left: 5px solid #10B981; background-color: #F0FDF4; opacity: 0.7; }
-.border-l-status-failed { border-left: 5px solid #EF4444; background-color: #FEF2F2; opacity: 0.7; }
+.border-l-status-success { border-left: 5px solid #10B981; background-color: #F0FDF4; opacity: 0.8; }
+.border-l-status-failed { border-left: 5px solid #EF4444; background-color: #FEF2F2; opacity: 0.8; }
 .border-l-status-partial { border-left: 5px solid #F59E0B; background-color: #FFFBEB; }
 
 /* Botões */
 .btn-action-lg {
-  height: 50px;
+  height: 52px;
   text-transform: uppercase;
   font-weight: 800;
   font-size: 12px;
@@ -84,7 +84,7 @@ body {
 @keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 '''
 
-# 2. APP.JSX (Lógica de Mapa Estável + Avanço por Item)
+# 2. APP.JSX (Lógica de Fluxo Intra-Grupo)
 files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
@@ -96,7 +96,7 @@ import Map, { Marker, NavigationControl } from 'react-map-gl/maplibre';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v28_stable';
+const DB_KEY = 'mp_db_v29_flow_perfect';
 
 // --- HELPERS ---
 
@@ -193,7 +193,6 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   
-  // Referência do mapa para controle manual
   const mapRef = useRef(null);
 
   useEffect(() => {
@@ -316,7 +315,6 @@ export default function App() {
           route.stops[stopIndex].status = status;
           setRoutes(updatedRoutes);
           if (status === 'success') showToast("Entregue!", "success");
-          else showToast("Não Entregue", "error");
       }
   };
 
@@ -328,7 +326,6 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
-  // Centraliza o mapa
   const recenterMap = () => {
       if (nextGroup && mapRef.current) {
           mapRef.current.flyTo({
@@ -343,18 +340,20 @@ export default function App() {
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   
-  // Próximo grupo pendente/parcial
+  // LÓGICA CRÍTICA DE FLUXO V29:
+  // O próximo grupo é o primeiro que tem status 'pending' OU 'partial'
+  // Isso garante que se um grupo começou mas não terminou, ele continua sendo o "next"
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
-  // Próximo ITEM específico dentro do grupo (para atualizar o cabeçalho)
+  // Dentro desse grupo, qual é o próximo item pendente?
   const currentItem = nextGroup ? nextGroup.items.find(i => i.status === 'pending') : null;
 
-  // Efeito para centralizar mapa UMA VEZ ao mudar de alvo (Estabilidade)
+  // Efeito para centralizar mapa UMA VEZ ao mudar de alvo
   useEffect(() => {
       if (showMap && nextGroup && mapRef.current) {
           mapRef.current.flyTo({ center: [nextGroup.lng, nextGroup.lat], zoom: 15 });
       }
-  }, [nextGroup?.id, showMap]); // Só roda se o ID do grupo mudar
+  }, [nextGroup?.id, showMap]); 
 
   const filteredGroups = useMemo(() => {
       if (!searchQuery) return groupedStops;
@@ -479,23 +478,19 @@ export default function App() {
                   <Map 
                       ref={mapRef}
                       initialViewState={{
-                          longitude: -46.63,
-                          latitude: -23.55,
-                          zoom: 13
+                          longitude: nextGroup?.lng || -46.63,
+                          latitude: nextGroup?.lat || -23.55,
+                          zoom: 14
                       }}
                       style={{width: '100%', height: '100%'}}
                       mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
                   >
                       <NavigationControl position="top-right" />
-                      
-                      {/* PINO DE DESTAQUE (ALVO) */}
                       {nextGroup && (
                           <Marker longitude={nextGroup.lng} latitude={nextGroup.lat} anchor="bottom">
                               <div className="text-4xl drop-shadow-md">🎯</div>
                           </Marker>
                       )}
-
-                      {/* OUTROS PONTOS */}
                       {groupedStops.map((g) => {
                           if (nextGroup && g.id === nextGroup.id) return null;
                           return (
@@ -506,7 +501,6 @@ export default function App() {
                       })}
                   </Map>
                   
-                  {/* CONTROLE FLUTUANTE MAPA */}
                   {nextGroup && (
                       <div className="absolute bottom-6 left-4 right-4 z-[1000] flex gap-2">
                           <div className="flex-1 bg-white p-4 rounded-xl shadow-xl border border-slate-200">
@@ -524,15 +518,15 @@ export default function App() {
                   {!searchQuery && nextGroup && activeRoute.optimized && currentItem && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-500">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
-                          {/* MOSTRA O ENDEREÇO DO ITEM ATUAL, NÃO DO GRUPO GENÉRICO */}
                           <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{currentItem.address}</h3>
                           <p className="text-sm text-slate-500 mb-4">{currentItem.name} • {currentItem.recipient}</p>
                           
                           <div className="space-y-3 border-t border-slate-100 pt-3">
-                              {/* LISTA FILTRADA: APENAS PENDENTES DO GRUPO */}
+                              {/* MOSTRA TODOS DO GRUPO PARA CONTEXTO, MAS DESTACA O ATUAL */}
                               {nextGroup.items.map(item => {
+                                  // Se já foi finalizado, não mostra no destaque
                                   if (item.status !== 'pending') return null;
-                                  // Se for o item atual (primeiro da lista), destaca
+                                  
                                   const isTopItem = item.id === currentItem.id;
                                   
                                   return (
@@ -545,8 +539,8 @@ export default function App() {
                                           
                                           {isTopItem && (
                                               <div className="flex gap-2 w-full">
-                                                  <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={20} className="mb-1"/> Falha</button>
-                                                  <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={24} className="mb-1"/> ENTREGUE</button>
+                                                  <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={18} className="mb-1"/> Não Entregue</button>
+                                                  <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={20} className="mb-1"/> ENTREGUE</button>
                                               </div>
                                           )}
                                       </div>
@@ -593,7 +587,7 @@ export default function App() {
 '''
 
 def main():
-    print(f"🚀 ATUALIZAÇÃO V28 (STABLE MAP & INSTANT NEXT) - {APP_NAME}")
+    print(f"🚀 ATUALIZAÇÃO V29 (FLOW PERFECTION) - {APP_NAME}")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
     
@@ -610,7 +604,7 @@ def main():
         
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "fix: V28 Stop Infinite Map & Instant Item Advance"', shell=True)
+    subprocess.run('git commit -m "feat: V29 MapLibre Vector Map & Blocking Group Flow"', shell=True)
     subprocess.run("git push origin main", shell=True)
     
     try: os.remove(__file__)
@@ -618,4 +612,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
