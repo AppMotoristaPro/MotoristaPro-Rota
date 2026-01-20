@@ -1,4 +1,83 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. CSS (Adicionar animação de Toast)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.modern-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: transform 0.1s ease;
+  overflow: hidden;
+}
+
+.modern-card:active { transform: scale(0.995); }
+.grouped-card { border-left: 4px solid #3B82F6; }
+
+.btn-action-lg {
+  height: 56px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+}
+
+.fab-main {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
+}
+
+.btn-highlight {
+  background-color: #2563EB;
+  color: white;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.btn-secondary {
+  background-color: #F1F5F9;
+  color: #64748B;
+}
+
+/* Toast Notification */
+.toast-enter {
+  transform: translateY(-100%);
+  opacity: 0;
+}
+.toast-enter-active {
+  transform: translateY(0);
+  opacity: 1;
+  transition: all 300ms ease-out;
+}
+'''
+
+# 2. APP.JSX (Lógica Corrigida de Otimização e Status)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -439,3 +518,33 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V20 (FUNCTIONAL FIX) - {APP_NAME}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
+    
+    print("\n📝 Escrevendo arquivos...")
+    for f, c in files_content.items():
+        if os.path.exists(f): 
+            dest = f"{BACKUP_ROOT}/{ts}/{f}"
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(f, dest)
+        d = os.path.dirname(f)
+        if d: os.makedirs(d, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V20 Fix Optimization Logic and Status Buttons"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+

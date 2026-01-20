@@ -20,6 +20,7 @@ body {
 }
 
 .modern-card:active { transform: scale(0.995); }
+
 .grouped-card { border-left: 4px solid #3B82F6; }
 
 .btn-action-lg {
@@ -49,15 +50,4 @@ body {
 .btn-secondary {
   background-color: #F1F5F9;
   color: #64748B;
-}
-
-/* Toast Notification */
-.toast-enter {
-  transform: translateY(-100%);
-  opacity: 0;
-}
-.toast-enter-active {
-  transform: translateY(0);
-  opacity: 1;
-  transition: all 300ms ease-out;
 }
