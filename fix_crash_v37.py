@@ -1,4 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# 1. APP.JSX (Com Sanitização de Dados e Proteção de Render)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -11,7 +22,7 @@ import * as XLSX from 'xlsx';
 
 // NOVA CHAVE PARA LIMPAR DADOS CORROMPIDOS
 const DB_KEY = 'mp_db_v37_clean';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS SEGUROS ---
 // Garante que qualquer valor vire string segura para renderizar
@@ -483,4 +494,27 @@ export default function App() {
           )}
       </div>
   );
-}
+}'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V37 (CRASH FIX & DATA SANITIZER) - {APP_NAME}")
+    
+    # 1. Substituir a chave no código
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando App.jsx...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V37 Safe Data Handling & Render Protection"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
