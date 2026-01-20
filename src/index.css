@@ -9,76 +9,67 @@ body {
   background-color: #F8FAFC;
   color: #0F172A;
   -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none; /* Previne pull-to-refresh acidental */
 }
 
-/* Garante que o mapa ocupe altura correta */
+/* Otimização do Mapa */
 .leaflet-container {
   width: 100%;
   height: 100%;
   z-index: 0;
-  background-color: #e5e7eb; /* Cinza enquanto carrega */
+  background: #e5e7eb;
+}
+
+/* Ícone de Destaque (Apenas para o alvo atual) */
+.pin-target {
+  background-color: #0F172A;
+  border: 3px solid white;
+  border-radius: 50%;
+  color: white;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  animation: pulse-pin 2s infinite;
+}
+
+@keyframes pulse-pin {
+  0% { box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(15, 23, 42, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(15, 23, 42, 0); }
 }
 
 /* Cards */
 .modern-card {
   background: white;
   border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  transition: transform 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
-  border: 1px solid #f1f5f9;
 }
-.modern-card:active { transform: scale(0.99); }
+.modern-card:active { transform: scale(0.98); }
 
-/* Cores de Status (Borda Lateral) */
-.border-l-status-pending { border-left: 6px solid #3B82F6; }
-.border-l-status-success { border-left: 6px solid #10B981; background-color: #F0FDF4; }
-.border-l-status-failed { border-left: 6px solid #EF4444; background-color: #FEF2F2; }
-.border-l-status-partial { border-left: 6px solid #F59E0B; background-color: #FFFBEB; }
+/* Cores de Status */
+.border-l-status-pending { border-left: 5px solid #3B82F6; }
+.border-l-status-success { border-left: 5px solid #10B981; background-color: #F0FDF4; opacity: 0.7; }
+.border-l-status-failed { border-left: 5px solid #EF4444; background-color: #FEF2F2; opacity: 0.7; }
+.border-l-status-partial { border-left: 5px solid #F59E0B; background-color: #FFFBEB; }
 
-/* Botões Grandes */
+/* Botões */
 .btn-action-lg {
-  height: 54px;
+  height: 50px;
   text-transform: uppercase;
   font-weight: 800;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.5px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-}
-
-/* Botões de Fluxo (Contorno e Destaque) */
-.btn-primary-outline {
-  border: 2px solid #2563EB;
-  color: #2563EB;
-  background: white;
-}
-.btn-primary-solid {
-  background: #2563EB;
-  color: white;
-  border: 2px solid #2563EB;
-  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
-}
-.btn-disabled {
-  background: #F1F5F9;
-  color: #94A3B8;
-  border: 2px solid #E2E8F0;
+  transition: background-color 0.1s;
 }
 
 /* Toast */
 .toast-anim { animation: slideIn 0.3s ease-out forwards; }
-@keyframes slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-/* Custom Pins */
-.custom-pin {
-  border: 2px solid white;
-  border-radius: 50%;
-  color: white;
-  font-weight: bold;
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 3px 6px rgba(0,0,0,0.3);
-}
+@keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
