@@ -1,4 +1,13 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import os
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+APP_JSX_PATH = "src/App.jsx"
+
+# Conteúdo do App.jsx (Usando raw string para evitar erros de formatação do Python)
+# Substituiremos __GOOGLE_KEY__ pela chave real depois.
+app_jsx_content = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -10,7 +19,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v33_gmaps';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS VISUAIS GOOGLE ---
 const getMarkerIcon = (status, isCurrent) => {
@@ -362,6 +371,12 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
+          {toast && (
+              <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+                  {toast.msg}
+              </div>
+          )}
+
           {showStartModal && (
               <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                   <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
@@ -505,4 +520,27 @@ export default function App() {
           )}
       </div>
   );
-}
+}'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V33 (BUILD FIX) - {APP_NAME}")
+    
+    # 1. Substituir a chave no código
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando App.jsx com Google Maps API...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V33 Correct React JSX Syntax for Google Maps"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+

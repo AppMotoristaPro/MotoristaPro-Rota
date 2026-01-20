@@ -1,4 +1,16 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import os
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"  # Variável que faltava
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# CONTEÚDO DO APP.JSX
+# Usamos r''' para que o Python não interprete chaves {} como formatação de string
+# Substituiremos __GOOGLE_KEY__ manualmente depois.
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -10,7 +22,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v33_gmaps';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS VISUAIS GOOGLE ---
 const getMarkerIcon = (status, isCurrent) => {
@@ -505,4 +517,30 @@ export default function App() {
           )}
       </div>
   );
-}
+}'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V33 FINAL (FIXED STRING) - {APP_NAME}")
+    
+    # 1. Substituir a chave no código
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando App.jsx com Google Maps API...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+    
+    # Escrever outros arquivos se necessário (como index.css e package.json)
+    # Mas o erro principal estava na formatação do JSX dentro do Python
+    
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V33 Final Build Fix with App Name Defined"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
