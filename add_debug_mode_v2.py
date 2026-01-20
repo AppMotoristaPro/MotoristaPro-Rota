@@ -1,4 +1,14 @@
-import React from 'react';
+import os
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. CRIAR COMPONENTE DE DEBUG (ErrorBoundary.jsx)
+# Este componente captura erros em qualquer lugar da árvore de componentes
+files_content['src/ErrorBoundary.jsx'] = r'''import React from 'react';
 import { AlertTriangle, Copy, Trash2, RefreshCw, Eye } from 'lucide-react';
 
 export default class ErrorBoundary extends React.Component {
@@ -124,3 +134,49 @@ export default class ErrorBoundary extends React.Component {
     return this.props.children; 
   }
 }
+'''
+
+# 2. ATUALIZAR MAIN.JSX PARA USAR O ERROR BOUNDARY
+files_content['src/main.jsx'] = r'''import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import ErrorBoundary from './ErrorBoundary.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </React.StrictMode>,
+)
+'''
+
+def main():
+    print(f"🚀 INJETANDO MODO DEBUG V2 - {APP_NAME}")
+    
+    print("\n📝 Criando componente de diagnóstico...")
+    for f, c in files_content.items():
+        dir_name = os.path.dirname(f)
+        if dir_name: os.makedirs(dir_name, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "chore: Add Robust ErrorBoundary for White Screen Diagnosis"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    print("\n✅ DEBUG ATIVO!")
+    print("1. Aguarde o APK ser gerado.")
+    print("2. Instale e abra o app.")
+    print("3. Quando der a TELA BRANCA, aparecerá a tela de erro vermelha.")
+    print("4. Clique em 'COPIAR LOG DE ERRO' e cole aqui.")
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
