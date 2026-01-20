@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
-  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
+  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import Map, { Marker, NavigationControl } from 'react-map-gl/maplibre';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v28_stable';
+const DB_KEY = 'mp_db_v27_ultimate';
 
 // --- HELPERS ---
 
@@ -50,7 +50,7 @@ const groupStopsByStopName = (stops) => {
             
             if (success === total) group.status = 'success';
             else if (failed === total) group.status = 'failed';
-            else if (success + failed > 0) group.status = 'partial';
+            else if (success + failed > 0) group.status = 'partial'; // Em andamento
             else group.status = 'pending';
 
             orderedGroups.push(group);
@@ -63,7 +63,9 @@ const groupStopsByStopName = (stops) => {
 
 const calculateRemainingMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
+    
     const pendingStops = stops.filter(s => s.status === 'pending');
+    
     if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
 
     let totalKm = 0;
@@ -90,7 +92,15 @@ const calculateRemainingMetrics = (stops, userPos) => {
     const avgSpeed = 18; 
     const serviceTime = pendingStops.length * 4; 
     const totalMin = (realKm / avgSpeed * 60) + serviceTime;
-    return { km: realKm.toFixed(1), time: `${Math.floor(totalMin / 60)}h ${Math.floor(totalMin % 60)}m`, remainingPackages: pendingStops.length };
+    
+    const h = Math.floor(totalMin / 60);
+    const m = Math.floor(totalMin % 60);
+
+    return { 
+        km: realKm.toFixed(1), 
+        time: `${h}h ${m}m`,
+        remainingPackages: pendingStops.length
+    };
 };
 
 export default function App() {
@@ -106,7 +116,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   
-  // Referência do mapa para controle manual
+  // Ref do Mapa
   const mapRef = useRef(null);
 
   useEffect(() => {
@@ -123,7 +133,7 @@ export default function App() {
 
   const showToast = (msg, type = 'success') => {
       setToast({ msg, type });
-      setTimeout(() => setToast(null), 1500);
+      setTimeout(() => setToast(null), 2000);
   };
 
   const getCurrentLocation = async (force = false) => {
@@ -229,7 +239,6 @@ export default function App() {
           route.stops[stopIndex].status = status;
           setRoutes(updatedRoutes);
           if (status === 'success') showToast("Entregue!", "success");
-          else showToast("Não Entregue", "error");
       }
   };
 
@@ -241,33 +250,13 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
-  // Centraliza o mapa
-  const recenterMap = () => {
-      if (nextGroup && mapRef.current) {
-          mapRef.current.flyTo({
-              center: [nextGroup.lng, nextGroup.lat],
-              zoom: 16,
-              duration: 1000
-          });
-      }
-  };
-
   // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   
-  // Próximo grupo pendente/parcial
+  // LÓGICA DE NEXT GROUP V27 (Bloqueante)
+  // Encontra o primeiro grupo que tem status 'pending' OU 'partial' (começou mas não terminou)
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
-  
-  // Próximo ITEM específico dentro do grupo (para atualizar o cabeçalho)
-  const currentItem = nextGroup ? nextGroup.items.find(i => i.status === 'pending') : null;
-
-  // Efeito para centralizar mapa UMA VEZ ao mudar de alvo (Estabilidade)
-  useEffect(() => {
-      if (showMap && nextGroup && mapRef.current) {
-          mapRef.current.flyTo({ center: [nextGroup.lng, nextGroup.lat], zoom: 15 });
-      }
-  }, [nextGroup?.id, showMap]); // Só roda se o ID do grupo mudar
 
   const filteredGroups = useMemo(() => {
       if (!searchQuery) return groupedStops;
@@ -390,78 +379,53 @@ export default function App() {
           {showMap ? (
               <div className="flex-1 relative bg-slate-100">
                   <Map 
-                      ref={mapRef}
                       initialViewState={{
-                          longitude: -46.63,
-                          latitude: -23.55,
-                          zoom: 13
+                          longitude: nextGroup?.lng || -46.63,
+                          latitude: nextGroup?.lat || -23.55,
+                          zoom: 14
                       }}
                       style={{width: '100%', height: '100%'}}
                       mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
                   >
                       <NavigationControl position="top-right" />
-                      
-                      {/* PINO DE DESTAQUE (ALVO) */}
                       {nextGroup && (
                           <Marker longitude={nextGroup.lng} latitude={nextGroup.lat} anchor="bottom">
-                              <div className="text-4xl drop-shadow-md">🎯</div>
+                              <div className="text-4xl">📍</div>
                           </Marker>
                       )}
-
-                      {/* OUTROS PONTOS */}
                       {groupedStops.map((g) => {
                           if (nextGroup && g.id === nextGroup.id) return null;
                           return (
                               <Marker key={g.id} longitude={g.lng} latitude={g.lat} anchor="center">
-                                  <div className={`w-3 h-3 rounded-full border border-white shadow-sm ${g.status==='success'?'bg-green-500':g.status==='failed'?'bg-red-500':'bg-blue-500'}`} />
+                                  <div className={`w-3 h-3 rounded-full border border-white ${g.status==='success'?'bg-green-500':g.status==='failed'?'bg-red-500':'bg-blue-500'}`} />
                               </Marker>
                           )
                       })}
                   </Map>
                   
-                  {/* CONTROLE FLUTUANTE MAPA */}
                   {nextGroup && (
-                      <div className="absolute bottom-6 left-4 right-4 z-[1000] flex gap-2">
-                          <div className="flex-1 bg-white p-4 rounded-xl shadow-xl border border-slate-200">
-                              <h3 className="font-bold text-slate-900 truncate">{currentItem ? currentItem.address : nextGroup.mainName}</h3>
-                              <p className="text-xs text-slate-500">{currentItem ? `Ref: ${currentItem.recipient}` : 'Local de Entrega'}</p>
-                          </div>
-                          <button onClick={recenterMap} className="bg-white p-4 rounded-xl shadow-xl text-slate-600"><Crosshair size={24}/></button>
+                      <div className="absolute bottom-6 left-4 right-4 bg-white p-4 rounded-xl shadow-xl z-[1000] border border-slate-200">
+                          <h3 className="font-bold text-slate-900 truncate">{nextGroup.mainName}</h3>
+                          <p className="text-xs text-slate-500 mb-3">{nextGroup.mainAddress}</p>
+                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold">Navegar</button>
                       </div>
                   )}
               </div>
           ) : (
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
-                  
-                  {/* DESTAQUE INTELIGENTE (ITEM ATUAL) */}
-                  {!searchQuery && nextGroup && activeRoute.optimized && currentItem && (
+                  {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-500">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
-                          {/* MOSTRA O ENDEREÇO DO ITEM ATUAL, NÃO DO GRUPO GENÉRICO */}
-                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{currentItem.address}</h3>
-                          <p className="text-sm text-slate-500 mb-4">{currentItem.name} • {currentItem.recipient}</p>
-                          
+                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{nextGroup.mainName}</h3>
+                          <p className="text-sm text-slate-500 mb-4">{nextGroup.mainAddress}</p>
+                          {nextGroup.items.length > 1 && <div className="mb-4 bg-blue-50 text-blue-800 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><Box size={14}/> {nextGroup.items.length} PACOTES</div>}
                           <div className="space-y-3 border-t border-slate-100 pt-3">
-                              {/* LISTA FILTRADA: APENAS PENDENTES DO GRUPO */}
                               {nextGroup.items.map(item => {
                                   if (item.status !== 'pending') return null;
-                                  // Se for o item atual (primeiro da lista), destaca
-                                  const isTopItem = item.id === currentItem.id;
-                                  
                                   return (
-                                      <div key={item.id} className={`flex flex-col p-3 rounded-lg border transition-all ${isTopItem ? 'bg-slate-50 border-slate-200 shadow-sm' : 'bg-white border-transparent opacity-50'}`}>
-                                          {!isTopItem && (
-                                              <div className="mb-2">
-                                                  <span className="text-xs font-bold text-slate-700 block">{item.address}</span>
-                                              </div>
-                                          )}
-                                          
-                                          {isTopItem && (
-                                              <div className="flex gap-2 w-full">
-                                                  <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={20} className="mb-1"/> Falha</button>
-                                                  <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={24} className="mb-1"/> ENTREGUE</button>
-                                              </div>
-                                          )}
+                                      <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                          <div className="mb-3"><span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span><span className="text-[10px] text-slate-400 block mt-1">Ref: {item.recipient}</span></div>
+                                          <div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={20} className="mb-1"/> Não Entregue</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={24} className="mb-1"/> ENTREGUE</button></div>
                                       </div>
                                   )
                               })}
@@ -480,7 +444,7 @@ export default function App() {
                       return (
                           <div key={group.id} className={`modern-card overflow-hidden ${statusClass} ${group.status !== 'pending' && !searchQuery ? 'opacity-60 grayscale' : ''}`}>
                               <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition-colors">
-                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : group.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : group.items.length}</div>
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : group.items.length}</div>
                                   <div className="flex-1 min-w-0"><div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">{group.mainName}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div><p className="text-xs text-slate-400 truncate">{group.mainAddress}</p></div>
                                   {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18} className="text-slate-400"/> : <ChevronDown size={18} className="text-slate-400"/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 hover:text-green-600 rounded-full"><Check size={18}/></button>)}
                               </div>
