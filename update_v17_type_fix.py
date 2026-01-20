@@ -1,4 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. APP.JSX (Correção do n.trim error + Todas as Funcionalidades V16)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -362,3 +375,40 @@ export default function App() {
       </div>
   );
 }
+'''
+
+# 3. RESTAURAR MAIN.JSX ORIGINAL (REMOVER ERROR BOUNDARY PARA PERFORMANCE)
+files_content['src/main.jsx'] = r'''import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V17 (TYPE SAFE) - {APP_NAME}")
+    
+    print("\n📝 Atualizando arquivos...")
+    for f, c in files_content.items():
+        dir_name = os.path.dirname(f)
+        if dir_name: os.makedirs(dir_name, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V17 Critical Fix for Numeric Stop Names"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
