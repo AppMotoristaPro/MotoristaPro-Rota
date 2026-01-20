@@ -31,12 +31,6 @@ jobs:
         
       - name: Add Android Platform
         run: npx cap add android
-      
-      # INJETAR PERMISSÕES NO ANDROID MANIFEST VIA SED
-      - name: Inject Android Permissions
-        run: |
-          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" \/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" \/><uses-feature android:name="android.hardware.location.gps" \/><\/manifest>/' android/app/src/main/AndroidManifest.xml
-          cat android/app/src/main/AndroidManifest.xml
         
       - name: Sync Capacitor
         run: npx cap sync
