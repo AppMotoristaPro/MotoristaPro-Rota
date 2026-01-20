@@ -2,13 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
-  ChevronUp, Box, Map, Loader2, Info
+  ChevronUp, Box, Map, Loader2
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v21_flow';
+const DB_KEY = 'mp_db_v20_fix';
 
 // --- HELPERS ---
 
@@ -16,6 +16,7 @@ const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
     const groups = {};
     
+    // Mantém a ordem original do array 'stops' (que já deve vir otimizado)
     stops.forEach(stop => {
         const rawName = stop.name ? String(stop.name) : 'Parada Sem Nome';
         const key = rawName.trim().toLowerCase();
@@ -27,37 +28,35 @@ const groupStopsByStopName = (stops) => {
                 lng: stop.lng,
                 mainName: rawName, 
                 mainAddress: stop.address,
-                items: [],
+                items: [], // A ordem dos itens aqui respeitará a ordem de inserção
                 status: 'pending'
             };
         }
         groups[key].items.push(stop);
     });
 
-    // Retorna array mantendo a ordem original da lista
+    // Retorna array de grupos preservando a ordem da primeira aparição na lista otimizada
+    // (Object.values não garante ordem, então vamos reconstruir baseado na lista original)
     const orderedGroups = [];
-    const seenKeys = new Set();
+    const processedKeys = new Set();
 
     stops.forEach(stop => {
         const rawName = stop.name ? String(stop.name) : 'Parada Sem Nome';
         const key = rawName.trim().toLowerCase();
-        
-        if (!seenKeys.has(key)) {
+        if (!processedKeys.has(key)) {
+            // Calcula status do grupo
             const group = groups[key];
+            const allSuccess = group.items.every(i => i.status === 'success');
+            const allFailed = group.items.every(i => i.status === 'failed');
+            const anyPending = group.items.some(i => i.status === 'pending');
             
-            // Recalcula status do grupo
-            const total = group.items.length;
-            const success = group.items.filter(i => i.status === 'success').length;
-            const failed = group.items.filter(i => i.status === 'failed').length;
-            const pending = group.items.filter(i => i.status === 'pending').length;
-
-            if (pending > 0) group.status = 'pending';
-            else if (failed === total) group.status = 'failed';
-            else if (success === total) group.status = 'success';
-            else group.status = 'partial'; // Misturado mas finalizado
+            if (allSuccess) group.status = 'success';
+            else if (allFailed) group.status = 'failed';
+            else if (!anyPending) group.status = 'partial';
+            else group.status = 'pending';
 
             orderedGroups.push(group);
-            seenKeys.add(key);
+            processedKeys.add(key);
         }
     });
 
@@ -82,6 +81,8 @@ const calculateRouteMetrics = (stops, userPos) => {
     };
 
     stops.forEach(stop => {
+        // Só conta distância para paradas pendentes para estimativa restante
+        // Mas para total inicial conta tudo. Aqui vamos mostrar total da rota.
         totalKm += calcDist(currentLat, currentLng, stop.lat, stop.lng);
         currentLat = stop.lat;
         currentLng = stop.lng;
@@ -111,9 +112,7 @@ export default function App() {
   const [userPos, setUserPos] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
-  
-  // Feedback Visual
-  const [toast, setToast] = useState(null);
+  const [toastMsg, setToastMsg] = useState(null);
 
   useEffect(() => {
     try {
@@ -127,9 +126,9 @@ export default function App() {
     localStorage.setItem(DB_KEY, JSON.stringify(routes));
   }, [routes]);
 
-  const showToast = (msg, type = 'success') => {
-      setToast({ msg, type });
-      setTimeout(() => setToast(null), 2500);
+  const showToast = (msg) => {
+      setToastMsg(msg);
+      setTimeout(() => setToastMsg(null), 3000);
   };
 
   const getCurrentLocation = async (force = false) => {
@@ -164,7 +163,7 @@ export default function App() {
             const safeString = (val) => val ? String(val) : '';
 
             return {
-                id: Date.now() + i + Math.random(),
+                id: Date.now() + i + Math.random(), // ID ÚNICO REAL
                 name: safeString(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
                 recipient: safeString(k['recebedor'] || k['contato'] || k['cliente'] || 'Recebedor'),
                 address: safeString(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
@@ -189,12 +188,13 @@ export default function App() {
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Excluir esta rota?")) {
+      if(confirm("Excluir rota?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
   };
 
+  // --- OTIMIZAÇÃO REAL ---
   const optimizeRoute = async () => {
       setIsOptimizing(true);
       
@@ -210,6 +210,7 @@ export default function App() {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
+      // Separa o que já foi feito do que falta
       const currentRoute = routes[rIdx];
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
@@ -217,6 +218,7 @@ export default function App() {
       let optimized = [];
       let pointer = currentPos;
 
+      // Algoritmo: Nearest Neighbor
       while(pending.length > 0) {
           let nearestIdx = -1;
           let minDist = Infinity;
@@ -231,32 +233,36 @@ export default function App() {
           pending.splice(nearestIdx, 1);
       }
 
+      // IMPORTANTE: Atualiza o estado global com a NOVA ORDEM
       const updatedRoutes = [...routes];
       updatedRoutes[rIdx] = {
           ...updatedRoutes[rIdx],
-          stops: [...done, ...optimized],
+          stops: [...done, ...optimized], // Coloca os feitos em cima, e os novos ordenados
           optimized: true
       };
       
       setRoutes(updatedRoutes);
       setIsOptimizing(false);
-      showToast("Rota Otimizada pelo GPS!", "info");
+      showToast("Rota Otimizada com Sucesso!");
   };
 
+  // --- MUDAR STATUS (CORREÇÃO) ---
   const setStatus = (stopId, status) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
       
       const updatedRoutes = [...routes];
       const route = updatedRoutes[rIdx];
+      
+      // Busca pelo ID único no array de paradas
       const stopIndex = route.stops.findIndex(s => s.id === stopId);
       
       if (stopIndex !== -1) {
           route.stops[stopIndex].status = status;
-          setRoutes(updatedRoutes);
-          
-          if (status === 'success') showToast("Pacote Entregue!", "success");
-          else showToast("Marcado como Não Entregue", "error");
+          setRoutes(updatedRoutes); // Salva mudança
+          if (status === 'success') showToast("Entrega Realizada!");
+      } else {
+          console.error("Parada não encontrada ID:", stopId);
       }
   };
 
@@ -271,18 +277,17 @@ export default function App() {
   // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   
+  // Agrupamento deve ser recalculado sempre que a ordem ou status muda
   const groupedStops = useMemo(() => {
       if (!activeRoute) return [];
       return groupStopsByStopName(activeRoute.stops);
-  }, [activeRoute]);
+  }, [activeRoute]); // Dependência crucial: activeRoute
 
   const metrics = useMemo(() => {
       if (!activeRoute) return { km: "0", time: "0h 0m", totalPackages: 0 };
       return calculateRouteMetrics(activeRoute.stops, userPos);
   }, [activeRoute, userPos]);
 
-  // Encontra o próximo grupo que tem status 'pending'
-  // Como 'groupedStops' mantém a ordem da lista otimizada, o primeiro 'pending' é o próximo.
   const nextGroup = groupedStops.find(g => g.status === 'pending');
 
   // VIEW: HOME
@@ -338,11 +343,10 @@ export default function App() {
   // VIEW: DETAILS
   return (
       <div className="flex flex-col h-screen bg-slate-50">
-          {/* TOAST FLUTUANTE */}
-          {toast && (
-              <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-message
-                  ${toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-slate-900'}`}>
-                  {toast.msg}
+          {/* TOAST MESSAGE */}
+          {toastMsg && (
+              <div className="fixed top-4 left-4 right-4 bg-slate-900 text-white p-3 rounded-lg shadow-xl z-50 text-center font-bold text-sm animate-in fade-in slide-in-from-top-5">
+                  {toastMsg}
               </div>
           )}
 
@@ -375,62 +379,35 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
-              
-              {/* DESTAQUE: PRÓXIMA PARADA */}
-              {nextGroup && activeRoute.optimized ? (
-                  <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-500">
+              {nextGroup && activeRoute.optimized && (
+                  <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
                       <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
                       <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{nextGroup.mainName}</h3>
                       <p className="text-sm text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                       
-                      {/* Resumo de Pacotes no Destaque */}
-                      <div className="space-y-3 border-t border-slate-100 pt-3">
-                          {nextGroup.items.map(item => {
-                              // Se já foi finalizado, não mostra no destaque para limpar a visão, 
-                              // a menos que seja o único
-                              if (item.status !== 'pending') return null;
+                      {nextGroup.items.length > 1 && <div className="mb-4 bg-blue-50 text-blue-800 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><Box size={14}/> {nextGroup.items.length} PACOTES</div>}
 
-                              return (
-                                <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                    <div className="mb-3">
-                                        <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
-                                        <span className="text-[10px] text-slate-400 block mt-1">Ref: {item.recipient}</span>
-                                    </div>
-                                    
-                                    <div className="flex gap-2 w-full">
-                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50">
-                                            <AlertTriangle size={20} className="mb-1"/> Não Entregue
-                                        </button>
-                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95">
-                                            <Check size={24} className="mb-1"/> ENTREGUE
-                                        </button>
-                                    </div>
-                                </div>
-                              )
-                          })}
+                      <div className="space-y-3 border-t border-slate-100 pt-3">
+                          {nextGroup.items.map(item => (
+                              <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg">
+                                  <div className="mb-2">
+                                      <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
+                                      <span className="text-[10px] text-slate-400 block mt-1">{item.name} • {item.recipient}</span>
+                                  </div>
+                                  <div className="flex gap-2 w-full">
+                                      <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={18} className="mb-1"/> Não Entregue</button>
+                                      <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={20} className="mb-1"/> ENTREGUE</button>
+                                  </div>
+                              </div>
+                          ))}
                       </div>
                   </div>
-              ) : (
-                  // Tela de Finalização
-                  activeRoute.optimized && (
-                      <div className="modern-card p-8 flex flex-col items-center text-center bg-green-50 border-green-200">
-                          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-                              <Check size={32} className="text-green-600"/>
-                          </div>
-                          <h3 className="text-xl font-bold text-green-800">Rota Finalizada!</h3>
-                          <p className="text-green-600 text-sm mt-1">Bom trabalho.</p>
-                      </div>
-                  )
               )}
 
-              {/* LISTA COMPLETA */}
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1 mt-6">Sequência de Paradas</h4>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Sequência de Paradas</h4>
 
               {groupedStops.map((group, idx) => {
-                  // Mostra todos, mas destaca visualmente
-                  const isNext = nextGroup && group.id === nextGroup.id;
-                  if (isNext && activeRoute.optimized) return null; // Já está no destaque principal
-
+                  if (nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
                   const isExpanded = expandedGroups[group.id];
                   const hasMulti = group.items.length > 1;
 
