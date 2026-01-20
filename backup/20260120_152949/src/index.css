@@ -10,6 +10,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Card Base */
 .modern-card {
   background: white;
   border-radius: 16px;
@@ -19,12 +20,18 @@ body {
   overflow: hidden;
 }
 
-.modern-card:active { transform: scale(0.995); }
+.modern-card:active {
+  transform: scale(0.995);
+}
 
-.grouped-card { border-left: 4px solid #3B82F6; }
+/* Card Agrupado */
+.grouped-card {
+  border-left: 4px solid #3B82F6; 
+}
 
+/* Botões de Ação Grandes */
 .btn-action-lg {
-  height: 56px;
+  height: 56px; /* Mais alto para facilitar o toque */
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -35,6 +42,7 @@ body {
   line-height: 1.1;
 }
 
+/* Botão Flutuante */
 .fab-main {
   background: #0F172A;
   color: white;
