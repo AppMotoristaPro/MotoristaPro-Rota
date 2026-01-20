@@ -8,8 +8,8 @@ import { Geolocation } from '@capacitor/geolocation';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-// KEY NOVA PARA GARANTIR LIMPEZA DE CACHE
-const DB_KEY = 'mp_db_v18_final';
+// KEY NOVA PARA LIMPAR DADOS VELHOS
+const DB_KEY = 'mp_db_v17_stable';
 
 // --- HELPERS ---
 
@@ -18,6 +18,7 @@ const groupStopsByStopName = (stops) => {
     const groups = {};
     
     stops.forEach(stop => {
+        // CORREÇÃO CRÍTICA: Converte para String antes de usar trim()
         const rawName = stop.name ? String(stop.name) : 'Parada Sem Nome';
         const key = rawName.trim().toLowerCase();
 
@@ -53,7 +54,6 @@ const calculateRouteMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", totalPackages: 0 };
     
     let totalKm = 0;
-    // Ponto inicial: Usuário (se disponível) ou primeira parada
     let currentLat = userPos ? userPos.lat : stops[0].lat;
     let currentLng = userPos ? userPos.lng : stops[0].lng;
 
@@ -73,16 +73,9 @@ const calculateRouteMetrics = (stops, userPos) => {
         currentLng = stop.lng;
     });
 
-    // --- FÓRMULA REALISTA V18 ---
-    // 1. Fator de Tortuosidade Urbano: 1.6 (Simula curvas e voltas de quarteirão)
-    const realKm = totalKm * 1.6; 
-    
-    // 2. Velocidade Média Urbana Conservadora: 18 km/h (Média SP/Capitais)
-    const avgSpeed = 18; 
-    
-    // 3. Tempo de Serviço: 4 minutos fixos por entrega
+    const realKm = totalKm * 1.4; 
+    const avgSpeed = 20; 
     const serviceTime = stops.length * 4; 
-    
     const totalMin = (realKm / avgSpeed * 60) + serviceTime;
     
     const h = Math.floor(totalMin / 60);
@@ -143,7 +136,10 @@ export default function App() {
 
         const norm = data.map((r, i) => {
             const k = {};
+            // Normaliza chaves com segurança
             Object.keys(r).forEach(key => k[String(key).trim().toLowerCase()] = r[key]);
+            
+            // Tratamento Seguro de Strings para evitar .trim() em números
             const safeString = (val) => val ? String(val) : '';
 
             return {
@@ -189,9 +185,8 @@ export default function App() {
       let optimized = [];
       let pointer = userPos;
 
-      // Nearest Neighbor
       while(pending.length > 0) {
-          let nearestIdx = -1, min = Infinity;
+          let nearestIdx = -1, minDist = Infinity;
           for(let i=0; i<pending.length; i++) {
               const d = Math.pow(pending[i].lat - pointer.lat, 2) + Math.pow(pending[i].lng - pointer.lng, 2);
               if (d < minDist) { minDist = d; nearestIdx = i; }
@@ -314,44 +309,31 @@ export default function App() {
                   )}
               </div>
           </div>
-
           <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
-              
-              {/* Destaque Próximo */}
               {nextGroup && activeRoute.optimized && (
                   <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
                       <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
                       <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{nextGroup.mainName}</h3>
                       <p className="text-sm text-slate-500 mb-4">{nextGroup.mainAddress}</p>
-                      
                       {nextGroup.items.length > 1 && <div className="mb-4 bg-blue-50 text-blue-800 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><Box size={14}/> {nextGroup.items.length} PACOTES</div>}
-
-                      <div className="space-y-3 border-t border-slate-100 pt-3">
+                      <div className="space-y-2 border-t border-slate-100 pt-3">
                           {nextGroup.items.map(item => (
-                              <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg">
-                                  {/* MUDANÇA: MOSTRAR ENDEREÇO AO INVÉS DE RECIPIENT */}
-                                  <div className="mb-2">
-                                      <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
-                                      <span className="text-[10px] text-slate-400 block mt-1">{item.name} • {item.recipient}</span>
-                                  </div>
-                                  
-                                  <div className="flex gap-2 w-full">
-                                      <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={18} className="mb-1"/> Não Entregue</button>
-                                      <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={20} className="mb-1"/> ENTREGUE</button>
+                              <div key={item.id} className="flex justify-between items-center">
+                                  <span className="text-sm font-medium text-slate-700">{item.name}</span>
+                                  <div className="flex gap-2">
+                                      <button onClick={() => setStatus(item.id, 'failed')} className="p-1.5 bg-red-50 text-red-500 rounded"><AlertTriangle size={14}/></button>
+                                      <button onClick={() => setStatus(item.id, 'success')} className="p-1.5 bg-green-500 text-white rounded"><Check size={14}/></button>
                                   </div>
                               </div>
                           ))}
                       </div>
                   </div>
               )}
-
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Sequência de Paradas</h4>
-
               {groupedStops.map((group, idx) => {
                   if (nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
                   const isExpanded = expandedGroups[group.id];
                   const hasMulti = group.items.length > 1;
-
                   return (
                       <div key={group.id} className={`modern-card overflow-hidden ${group.status !== 'pending' ? 'opacity-50 grayscale' : ''}`}>
                           <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition-colors">
@@ -362,25 +344,12 @@ export default function App() {
                               </div>
                               {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18} className="text-slate-400"/> : <ChevronDown size={18} className="text-slate-400"/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 hover:text-green-600 rounded-full"><Check size={18}/></button>)}
                           </div>
-                          
                           {(isExpanded || (hasMulti && isExpanded)) && (
-                              <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3 animate-in slide-in-from-top-2">
+                              <div className="bg-slate-50 border-t border-slate-100 px-4 py-1 space-y-1 animate-in slide-in-from-top-2">
                                   {group.items.map(item => (
-                                      <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                          {/* MUDANÇA: ENDEREÇO EM DESTAQUE NA LISTA EXPANDIDA TAMBÉM */}
-                                          <div className="mb-2">
-                                              <span className="text-sm font-bold text-slate-700 block">{item.address}</span>
-                                              <span className="text-[10px] text-slate-400">{item.name}</span>
-                                          </div>
-                                          
-                                          {item.status === 'pending' ? (
-                                              <div className="flex gap-2 w-full">
-                                                  <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded font-bold text-xs">FALHA</button>
-                                                  <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded font-bold text-xs shadow-sm">ENTREGUE</button>
-                                              </div>
-                                          ) : (
-                                              <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>
-                                          )}
+                                      <div key={item.id} className="flex justify-between items-center py-3 border-b border-slate-200 last:border-0">
+                                          <div className="flex items-center gap-3 overflow-hidden"><Box size={14} className="text-slate-400 shrink-0"/><div className="flex flex-col min-w-0"><span className="text-sm font-bold text-slate-700 truncate">{item.recipient}</span>{item.name !== group.mainName && <span className="text-[10px] text-slate-400 truncate">{item.name}</span>}</div></div>
+                                          <div className="flex gap-2 shrink-0 ml-2">{item.status === 'pending' ? (<><button onClick={() => setStatus(item.id, 'failed')} className="text-red-400 p-1 hover:bg-red-100 rounded"><AlertTriangle size={16}/></button><button onClick={() => setStatus(item.id, 'success')} className="text-green-500 p-1 hover:bg-green-100 rounded"><Check size={18}/></button></>) : (<span className={`text-[10px] font-bold px-2 py-1 rounded ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{item.status === 'success' ? 'OK' : 'X'}</span>)}</div>
                                       </div>
                                   ))}
                               </div>

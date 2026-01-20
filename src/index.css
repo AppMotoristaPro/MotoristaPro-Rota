@@ -16,33 +16,46 @@ body {
   border-radius: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(0,0,0,0.05);
-  transition: transform 0.1s ease, box-shadow 0.2s ease;
+  transition: transform 0.1s ease;
   overflow: hidden;
 }
 
 .modern-card:active {
-  transform: scale(0.99);
+  transform: scale(0.995);
 }
 
-/* Card Agrupado (Indicador visual) */
+/* Card Agrupado */
 .grouped-card {
-  border-left: 4px solid #3B82F6; /* Azul */
+  border-left: 4px solid #3B82F6; 
 }
 
-/* Botões */
+/* Botões de Ação Grandes */
+.btn-action-lg {
+  height: 56px; /* Mais alto para facilitar o toque */
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+}
+
+/* Botão Flutuante */
+.fab-main {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
+}
+
 .btn-highlight {
-  background-color: #2563EB; /* Azul Forte */
+  background-color: #2563EB;
   color: white;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
 }
 
 .btn-secondary {
-  background-color: #F1F5F9; /* Cinza */
+  background-color: #F1F5F9;
   color: #64748B;
-}
-
-.fab-main {
-  background: #0F172A;
-  color: white;
-  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
 }
