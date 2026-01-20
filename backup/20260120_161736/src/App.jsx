@@ -2,13 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
-  ChevronUp, Box, Map, Loader2, Search, X
+  ChevronUp, Box, Map, Loader2, Info
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v22_autopilot';
+const DB_KEY = 'mp_db_v21_flow';
 
 // --- HELPERS ---
 
@@ -34,6 +34,7 @@ const groupStopsByStopName = (stops) => {
         groups[key].items.push(stop);
     });
 
+    // Retorna array mantendo a ordem original da lista
     const orderedGroups = [];
     const seenKeys = new Set();
 
@@ -44,15 +45,16 @@ const groupStopsByStopName = (stops) => {
         if (!seenKeys.has(key)) {
             const group = groups[key];
             
-            // Lógica de Status V22 (Verde, Vermelho, Amarelo)
+            // Recalcula status do grupo
             const total = group.items.length;
             const success = group.items.filter(i => i.status === 'success').length;
             const failed = group.items.filter(i => i.status === 'failed').length;
-            
-            if (success === total) group.status = 'success'; // Tudo entregue
-            else if (failed === total) group.status = 'failed'; // Tudo falhou
-            else if (success + failed === total) group.status = 'partial'; // Misturado (mas finalizado)
-            else group.status = 'pending'; // Ainda tem pendente
+            const pending = group.items.filter(i => i.status === 'pending').length;
+
+            if (pending > 0) group.status = 'pending';
+            else if (failed === total) group.status = 'failed';
+            else if (success === total) group.status = 'success';
+            else group.status = 'partial'; // Misturado mas finalizado
 
             orderedGroups.push(group);
             seenKeys.add(key);
@@ -62,19 +64,12 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-// Calcula apenas o que FALTA entregar
-const calculateRemainingMetrics = (stops, userPos) => {
-    if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
+const calculateRouteMetrics = (stops, userPos) => {
+    if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", totalPackages: 0 };
     
-    // Filtra apenas pendentes
-    const pendingStops = stops.filter(s => s.status === 'pending');
-    
-    if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
-
     let totalKm = 0;
-    // Começa do usuário ou do primeiro pendente
-    let currentLat = userPos ? userPos.lat : pendingStops[0].lat;
-    let currentLng = userPos ? userPos.lng : pendingStops[0].lng;
+    let currentLat = userPos ? userPos.lat : stops[0].lat;
+    let currentLng = userPos ? userPos.lng : stops[0].lng;
 
     const calcDist = (lat1, lon1, lat2, lon2) => {
         const R = 6371; 
@@ -86,7 +81,7 @@ const calculateRemainingMetrics = (stops, userPos) => {
         return R * c;
     };
 
-    pendingStops.forEach(stop => {
+    stops.forEach(stop => {
         totalKm += calcDist(currentLat, currentLng, stop.lat, stop.lng);
         currentLat = stop.lat;
         currentLng = stop.lng;
@@ -94,7 +89,7 @@ const calculateRemainingMetrics = (stops, userPos) => {
 
     const realKm = totalKm * 1.6; 
     const avgSpeed = 18; 
-    const serviceTime = pendingStops.length * 4; 
+    const serviceTime = stops.length * 4; 
     const totalMin = (realKm / avgSpeed * 60) + serviceTime;
     
     const h = Math.floor(totalMin / 60);
@@ -103,7 +98,7 @@ const calculateRemainingMetrics = (stops, userPos) => {
     return { 
         km: realKm.toFixed(1), 
         time: `${h}h ${m}m`,
-        remainingPackages: pendingStops.length
+        totalPackages: stops.length
     };
 };
 
@@ -116,10 +111,9 @@ export default function App() {
   const [userPos, setUserPos] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [toast, setToast] = useState(null);
   
-  // Estado da Busca
-  const [searchQuery, setSearchQuery] = useState('');
+  // Feedback Visual
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     try {
@@ -246,7 +240,7 @@ export default function App() {
       
       setRoutes(updatedRoutes);
       setIsOptimizing(false);
-      showToast("Rota Otimizada!", "success");
+      showToast("Rota Otimizada pelo GPS!", "info");
   };
 
   const setStatus = (stopId, status) => {
@@ -260,8 +254,9 @@ export default function App() {
       if (stopIndex !== -1) {
           route.stops[stopIndex].status = status;
           setRoutes(updatedRoutes);
+          
           if (status === 'success') showToast("Pacote Entregue!", "success");
-          else showToast("Ocorrência Registrada", "error");
+          else showToast("Marcado como Não Entregue", "error");
       }
   };
 
@@ -281,22 +276,13 @@ export default function App() {
       return groupStopsByStopName(activeRoute.stops);
   }, [activeRoute]);
 
-  // Filtragem da Busca
-  const filteredGroups = useMemo(() => {
-      if (!searchQuery) return groupedStops;
-      const lower = searchQuery.toLowerCase();
-      return groupedStops.filter(g => 
-          g.mainName.toLowerCase().includes(lower) || 
-          g.mainAddress.toLowerCase().includes(lower) ||
-          g.items.some(i => i.recipient.toLowerCase().includes(lower))
-      );
-  }, [groupedStops, searchQuery]);
-
   const metrics = useMemo(() => {
-      if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-      return calculateRemainingMetrics(activeRoute.stops, userPos);
-  }, [activeRoute, userPos]); // Atualiza conforme entrega
+      if (!activeRoute) return { km: "0", time: "0h 0m", totalPackages: 0 };
+      return calculateRouteMetrics(activeRoute.stops, userPos);
+  }, [activeRoute, userPos]);
 
+  // Encontra o próximo grupo que tem status 'pending'
+  // Como 'groupedStops' mantém a ordem da lista otimizada, o primeiro 'pending' é o próximo.
   const nextGroup = groupedStops.find(g => g.status === 'pending');
 
   // VIEW: HOME
@@ -352,9 +338,10 @@ export default function App() {
   // VIEW: DETAILS
   return (
       <div className="flex flex-col h-screen bg-slate-50">
+          {/* TOAST FLUTUANTE */}
           {toast && (
               <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-message
-                  ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+                  ${toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-slate-900'}`}>
                   {toast.msg}
               </div>
           )}
@@ -365,96 +352,92 @@ export default function App() {
                   <h2 className="font-bold text-slate-800 truncate px-4 flex-1 text-center">{activeRoute.name}</h2>
                   <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
               </div>
-              
-              {/* BARRA DE PESQUISA */}
-              <div className="relative mb-4">
-                  <Search size={18} className="absolute left-3 top-3 text-slate-400"/>
-                  <input 
-                    type="text" 
-                    placeholder="Buscar endereço ou cliente..." 
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl search-input text-sm font-medium outline-none"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                  {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400"><X size={16}/></button>}
-              </div>
-
-              {activeRoute.optimized && !searchQuery && (
+              {activeRoute.optimized && (
                   <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4 animate-in fade-in">
                       <div className="flex items-center gap-2"><Map size={16} className="text-blue-500"/><span className="text-xs font-bold text-slate-600">{metrics.km} km</span></div>
                       <div className="w-px h-4 bg-slate-200"></div>
                       <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold text-slate-600">~{metrics.time}</span></div>
                       <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold text-slate-600">{metrics.remainingPackages} rest.</span></div>
+                      <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold text-slate-600">{metrics.totalPackages} vols</span></div>
                   </div>
               )}
-              
-              {!searchQuery && (
-                  <div className="flex gap-3">
-                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
-                          {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} 
-                          {isOptimizing ? 'Calculando...' : (activeRoute.optimized ? 'Reotimizar' : 'Otimizar Rota')}
+              <div className="flex gap-3">
+                  <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
+                      {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} 
+                      {isOptimizing ? 'Calculando...' : (activeRoute.optimized ? 'Reotimizar' : 'Otimizar Rota')}
+                  </button>
+                  {nextGroup && (
+                      <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+                          <Navigation size={18}/> Iniciar Rota
                       </button>
-                      {nextGroup && (
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
-                              <Navigation size={18}/> Iniciar Rota
-                          </button>
-                      )}
-                  </div>
-              )}
+                  )}
+              </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
               
-              {/* DESTAQUE PRÓXIMO (Some se estiver buscando) */}
-              {!searchQuery && nextGroup && activeRoute.optimized && (
-                  <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
+              {/* DESTAQUE: PRÓXIMA PARADA */}
+              {nextGroup && activeRoute.optimized ? (
+                  <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md transition-all duration-500">
                       <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
                       <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{nextGroup.mainName}</h3>
                       <p className="text-sm text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                       
-                      {nextGroup.items.length > 1 && <div className="mb-4 bg-blue-50 text-blue-800 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2"><Box size={14}/> {nextGroup.items.length} PACOTES</div>}
-
+                      {/* Resumo de Pacotes no Destaque */}
                       <div className="space-y-3 border-t border-slate-100 pt-3">
-                          {nextGroup.items.map(item => (
-                              <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg">
-                                  <div className="mb-2">
-                                      <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
-                                      <span className="text-[10px] text-slate-400 block mt-1">{item.name} • {item.recipient}</span>
-                                  </div>
-                                  <div className="flex gap-2 w-full">
-                                      <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><AlertTriangle size={18} className="mb-1"/> Não Entregue</button>
-                                      <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95"><Check size={20} className="mb-1"/> ENTREGUE</button>
-                                  </div>
-                              </div>
-                          ))}
+                          {nextGroup.items.map(item => {
+                              // Se já foi finalizado, não mostra no destaque para limpar a visão, 
+                              // a menos que seja o único
+                              if (item.status !== 'pending') return null;
+
+                              return (
+                                <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                    <div className="mb-3">
+                                        <span className="text-sm font-bold text-slate-800 block leading-tight">{item.address}</span>
+                                        <span className="text-[10px] text-slate-400 block mt-1">Ref: {item.recipient}</span>
+                                    </div>
+                                    
+                                    <div className="flex gap-2 w-full">
+                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50">
+                                            <AlertTriangle size={20} className="mb-1"/> Não Entregue
+                                        </button>
+                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg bg-green-600 text-white rounded-lg shadow-sm active:scale-95">
+                                            <Check size={24} className="mb-1"/> ENTREGUE
+                                        </button>
+                                    </div>
+                                </div>
+                              )
+                          })}
                       </div>
                   </div>
+              ) : (
+                  // Tela de Finalização
+                  activeRoute.optimized && (
+                      <div className="modern-card p-8 flex flex-col items-center text-center bg-green-50 border-green-200">
+                          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                              <Check size={32} className="text-green-600"/>
+                          </div>
+                          <h3 className="text-xl font-bold text-green-800">Rota Finalizada!</h3>
+                          <p className="text-green-600 text-sm mt-1">Bom trabalho.</p>
+                      </div>
+                  )
               )}
 
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">
-                  {searchQuery ? 'Resultados da Busca' : 'Sequência de Paradas'}
-              </h4>
+              {/* LISTA COMPLETA */}
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1 mt-6">Sequência de Paradas</h4>
 
-              {filteredGroups.map((group, idx) => {
-                  // Se não estiver buscando, esconde o que já está no destaque
-                  if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
-                  
+              {groupedStops.map((group, idx) => {
+                  // Mostra todos, mas destaca visualmente
+                  const isNext = nextGroup && group.id === nextGroup.id;
+                  if (isNext && activeRoute.optimized) return null; // Já está no destaque principal
+
                   const isExpanded = expandedGroups[group.id];
                   const hasMulti = group.items.length > 1;
-                  
-                  // Definição de Cores da Borda Lateral
-                  let statusClass = "status-pending";
-                  if (group.status === 'success') statusClass = "status-success";
-                  if (group.status === 'failed') statusClass = "status-failed";
-                  if (group.status === 'partial') statusClass = "status-partial";
 
                   return (
-                      <div key={group.id} className={`modern-card overflow-hidden ${statusClass} ${group.status !== 'pending' && !searchQuery ? 'opacity-50 grayscale' : ''}`}>
+                      <div key={group.id} className={`modern-card overflow-hidden ${group.status !== 'pending' ? 'opacity-50 grayscale' : ''}`}>
                           <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition-colors">
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                  {group.status === 'success' ? <Check size={14}/> : idx + 1}
-                              </div>
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : idx + 1}</div>
                               <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">{group.mainName}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div>
                                   <p className="text-xs text-slate-400 truncate">{group.mainAddress}</p>

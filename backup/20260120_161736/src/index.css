@@ -10,37 +10,23 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Card Base */
 .modern-card {
   background: white;
   border-radius: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(0,0,0,0.05);
-  transition: transform 0.1s ease;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
 }
 
-.modern-card:active { transform: scale(0.995); }
+.modern-card:active { transform: scale(0.99); }
 
-/* Indicadores de Status do Grupo */
-.status-pending { border-left: 4px solid #3B82F6; } /* Azul */
-.status-success { border-left: 4px solid #10B981; background-color: #F0FDF4; } /* Verde */
-.status-failed { border-left: 4px solid #EF4444; background-color: #FEF2F2; } /* Vermelho */
-.status-partial { border-left: 4px solid #F59E0B; background-color: #FFFBEB; } /* Laranja */
+.grouped-card { border-left: 4px solid #3B82F6; }
 
-/* Inputs */
-.search-input {
-  background-color: #F1F5F9;
-  border: 1px solid transparent;
-  transition: all 0.2s;
-}
-.search-input:focus {
-  background-color: white;
-  border-color: #3B82F6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
+/* Botões Grandes */
 .btn-action-lg {
-  height: 56px;
+  height: 52px;
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -69,6 +55,12 @@ body {
   color: #64748B;
 }
 
-/* Toast */
-.toast-enter { transform: translateY(-20px); opacity: 0; }
-.toast-enter-active { transform: translateY(0); opacity: 1; transition: all 0.3s; }
+/* Toast Animation */
+@keyframes slideDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.toast-message {
+  animation: slideDown 0.3s ease-out forwards;
+}
