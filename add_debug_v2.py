@@ -1,4 +1,13 @@
-import React from 'react';
+import os
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. ERROR BOUNDARY COM COPY-PASTE (Funciona 100% no Android)
+files_content['src/ErrorBoundary.jsx'] = r'''import React from 'react';
 import { AlertTriangle, Copy, Trash2, RefreshCw, Eye } from 'lucide-react';
 
 export default class ErrorBoundary extends React.Component {
@@ -101,3 +110,43 @@ export default class ErrorBoundary extends React.Component {
     return this.props.children; 
   }
 }
+'''
+
+# 2. MAIN.JSX
+files_content['src/main.jsx'] = r'''import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import ErrorBoundary from './ErrorBoundary.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </React.StrictMode>,
+)
+'''
+
+def main():
+    print(f"🚀 INJETANDO DEBUG V2 (CLIPBOARD) - {APP_NAME}")
+    
+    print("\n📝 Atualizando ErrorBoundary...")
+    for f, c in files_content.items():
+        dir_name = os.path.dirname(f)
+        if dir_name: os.makedirs(dir_name, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "chore: Debug V2 using Clipboard instead of File"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
