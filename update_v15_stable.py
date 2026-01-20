@@ -1,4 +1,44 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import subprocess
+from datetime import datetime
+
+# --- CONFIGURAÇÕES ---
+REPO_URL = "https://github.com/AppMotoristaPro/MotoristaPro-Rota.git"
+BACKUP_ROOT = "backup"
+APP_NAME = "MotoristaPro-Rota"
+
+files_content = {}
+
+# 1. CSS (Mantendo o estilo moderno)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #F8FAFC;
+  color: #1E293B;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.modern-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  border: 1px solid #F1F5F9;
+}
+
+.fab {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.4);
+}
+'''
+
+# 2. APP.JSX (Blindado contra erros)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo } from 'react';
 // Importando apenas ícones essenciais e seguros
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
@@ -474,3 +514,33 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V14 (STABILITY FIX) - {APP_NAME}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(f"{BACKUP_ROOT}/{ts}", exist_ok=True)
+    
+    print("\n📝 Escrevendo arquivos...")
+    for f, c in files_content.items():
+        if os.path.exists(f): 
+            dest = f"{BACKUP_ROOT}/{ts}/{f}"
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(f, dest)
+        d = os.path.dirname(f)
+        if d: os.makedirs(d, exist_ok=True)
+        with open(f, 'w', encoding='utf-8') as file: file.write(c)
+        print(f"   ✅ {f}")
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V14 Stability - Remove Gauge icon and Safe Data Loading"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
