@@ -9,7 +9,7 @@ import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, DirectionsService, Dir
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v45_nav_pro';
+const DB_KEY = 'mp_db_v46_mapfix';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
 // --- HELPERS VISUAIS ---
@@ -33,10 +33,9 @@ const getMarkerIcon = (status, isCurrent) => {
     };
 };
 
-// Ícone do Carro/Usuário (Seta de Navegação)
 const getUserIcon = (heading) => {
     return {
-        path: "M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z", // Seta
+        path: "M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z", 
         fillColor: "#4285F4",
         fillOpacity: 1,
         strokeWeight: 2,
@@ -49,7 +48,17 @@ const getUserIcon = (heading) => {
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 
-// --- HELPERS DE DADOS ---
+// DEFINIÇÃO CORRETA DAS OPÇÕES DO MAPA
+const defaultMapOptions = {
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false
+};
+
+// --- HELPERS DADOS ---
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
     if (typeof val === 'object') return JSON.stringify(val);
@@ -60,7 +69,7 @@ const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
     const groups = {};
     stops.forEach(stop => {
-        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
+        const rawName = stop.name ? String(stop.name) : 'Sem Nome';
         const key = rawName.trim().toLowerCase();
         if (!groups[key]) {
             groups[key] = {
@@ -75,7 +84,7 @@ const groupStopsByStopName = (stops) => {
     const ordered = [];
     const seen = new Set();
     stops.forEach(stop => {
-        const key = (safeStr(stop.stopName) || 'Local Sem Nome').toLowerCase();
+        const key = (safeStr(stop.stopName) || 'Sem Nome').toLowerCase();
         if (!seen.has(key)) {
             const g = groups[key];
             const t = g.items.length;
@@ -92,17 +101,15 @@ const groupStopsByStopName = (stops) => {
     return ordered;
 };
 
-// --- ALGORITMO DE OTIMIZAÇÃO V45 (ROLLING CHAIN) ---
+// Algoritmo de Otimização em Cadeia (Rolling Chain)
 const optimizeRollingChain = async (allStops, startPos) => {
     let unvisited = [...allStops];
     let finalRoute = [];
     let currentPos = startPos;
     const service = new window.google.maps.DirectionsService();
 
-    // Loop enquanto houver paradas
     while (unvisited.length > 0) {
-        // 1. Encontra os 23 pontos mais próximos do ponto atual (Cluster Dinâmico)
-        // Usamos 23 para deixar margem para origem e destino na API (Max 25)
+        // Encontra os 23 mais próximos
         unvisited.sort((a, b) => {
             const dA = Math.pow(a.lat - currentPos.lat, 2) + Math.pow(a.lng - currentPos.lng, 2);
             const dB = Math.pow(b.lat - currentPos.lat, 2) + Math.pow(b.lng - currentPos.lng, 2);
@@ -110,16 +117,15 @@ const optimizeRollingChain = async (allStops, startPos) => {
         });
 
         const batch = unvisited.slice(0, 23);
-        unvisited = unvisited.slice(23); // Remove os escolhidos da lista global
+        unvisited = unvisited.slice(23);
 
-        // 2. Manda o Google Otimizar esse lote
         const waypoints = batch.map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
         
         try {
             const result = await new Promise((resolve, reject) => {
                 service.route({
                     origin: currentPos,
-                    destination: batch[batch.length - 1], // Destino provisório, Google vai reordenar
+                    destination: batch[batch.length - 1], 
                     waypoints: waypoints,
                     optimizeWaypoints: true,
                     travelMode: 'DRIVING'
@@ -131,22 +137,16 @@ const optimizeRollingChain = async (allStops, startPos) => {
 
             const order = result.routes[0].waypoint_order;
             const orderedBatch = order.map(idx => batch[idx]);
-            
             finalRoute.push(...orderedBatch);
-            
-            // O último ponto deste lote vira o início do próximo
             currentPos = orderedBatch[orderedBatch.length - 1];
-            
-            // Pequeno delay para evitar rate limit
-            await new Promise(r => setTimeout(r, 400));
+            await new Promise(r => setTimeout(r, 300));
 
         } catch (e) {
-            console.warn("Falha Google Batch, usando ordem local:", e);
+            console.warn("Falha Google Batch:", e);
             finalRoute.push(...batch);
             currentPos = batch[batch.length - 1];
         }
     }
-
     return finalRoute;
 };
 
@@ -157,10 +157,9 @@ export default function App() {
   const [newRouteName, setNewRouteName] = useState('');
   const [tempStops, setTempStops] = useState([]);
   
-  // Estados de Navegação
   const [userPos, setUserPos] = useState(null);
-  const [userHeading, setUserHeading] = useState(0); // Bússola
-  const [isNavigating, setIsNavigating] = useState(false); // Modo Follow Me
+  const [userHeading, setUserHeading] = useState(0);
+  const [isNavigating, setIsNavigating] = useState(false);
   
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -172,7 +171,6 @@ export default function App() {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [selectedMarker, setSelectedMarker] = useState(null);
 
-  // Estados Google Maps API
   const [directionsResponse, setDirectionsResponse] = useState(null);
   const mapRef = useRef(null);
 
@@ -199,11 +197,9 @@ export default function App() {
   const startGps = async () => {
       try {
           await Geolocation.requestPermissions();
-          // Watch Position para pegar movimento e direção
           Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 5000 }, (pos) => {
               if (pos) {
                   setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-                  // Pega a direção (heading) se disponível (GPS em movimento)
                   if (pos.coords.heading !== null && !isNaN(pos.coords.heading)) {
                       setUserHeading(pos.coords.heading);
                   }
@@ -230,7 +226,6 @@ export default function App() {
         const norm = data.map((r, i) => {
             const k = {};
             Object.keys(r).forEach(key => k[String(key).trim().toLowerCase()] = r[key]);
-            
             return {
                 id: Date.now() + i + Math.random(),
                 name: safeStr(k['stop'] || k['parada'] || k['cliente'] || `Parada ${i+1}`),
@@ -263,7 +258,6 @@ export default function App() {
 
   const handleOptimizeClick = () => setShowStartModal(true);
 
-  // --- LOGICA V45: OTIMIZAÇÃO EM CADEIA ---
   const runSmartOptimization = async (startPos) => {
       setIsOptimizing(true);
       setShowStartModal(false);
@@ -276,7 +270,6 @@ export default function App() {
       const done = currentRoute.stops.filter(s => s.status !== 'pending');
       
       try {
-          // Agrupar logicamente por local antes de otimizar
           const locationMap = new Map();
           pending.forEach(s => {
               const key = `${s.lat.toFixed(5)}_${s.lng.toFixed(5)}`;
@@ -288,7 +281,6 @@ export default function App() {
               lat: items[0].lat, lng: items[0].lng, items: items
           }));
 
-          // RODA O ALGORITMO ROLLING CHAIN
           const optimizedNodes = await optimizeRollingChain(uniqueLocations, startPos);
           
           const finalStops = [];
@@ -297,7 +289,7 @@ export default function App() {
           const updatedRoutes = [...routes];
           updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...finalStops], optimized: true };
           setRoutes(updatedRoutes);
-          showToast("Rota Otimizada com Sucesso!");
+          showToast("Rota Otimizada!");
       } catch (err) {
           alert("Erro otimização: " + err.message);
       }
@@ -308,7 +300,7 @@ export default function App() {
       let pos = userPos;
       if (!pos) pos = await getCurrentLocation(true);
       if (pos) runSmartOptimization(pos);
-      else alert("GPS indisponível.");
+      else alert("Ative o GPS.");
   };
 
   const confirmAddressStart = async () => {
@@ -338,6 +330,10 @@ export default function App() {
       }
   };
 
+  const openNav = (lat, lng) => {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
+  };
+
   const toggleGroup = (id) => setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
@@ -353,9 +349,7 @@ export default function App() {
       );
   }, [groupedStops, searchQuery]);
 
-  // --- INTEGRAÇÃO GOOGLE DIRECTIONS E CAMERA ---
-  
-  // 1. Calcular Rota Azul (Linha na Rua)
+  // DIRECTIONS SERVICE (Desenho da Rota)
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -371,15 +365,13 @@ export default function App() {
       }
   }, [nextGroup?.id, userPos?.lat, userPos?.lng, isLoaded]);
 
-  // 2. Follow Me + Head Up (Seguir GPS e Girar Mapa)
+  // FOLLOW ME (Giro do Mapa)
   useEffect(() => {
       if (isLoaded && mapRef.current && userPos && isNavigating) {
-          const map = mapRef.current;
-          
-          map.panTo(userPos); // Centraliza no carro
-          map.setZoom(18); // Zoom de navegação
-          map.setHeading(userHeading); // Gira o mapa conforme a bússola
-          map.setTilt(45); // Inclina para 3D
+          mapRef.current.panTo(userPos);
+          mapRef.current.setZoom(18);
+          mapRef.current.setHeading(userHeading);
+          mapRef.current.setTilt(45);
       }
   }, [userPos, userHeading, isNavigating, isLoaded]);
 
@@ -425,12 +417,12 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
-          {toast && <div className="fixed top-4 left-4 right-4 p-4 bg-green-600 text-white text-center font-bold rounded-xl shadow-2xl z-50 toast-anim">{toast.msg}</div>}
+          {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
           {showStartModal && (
               <div className="absolute inset-0 bg-black/60 z-[3000] flex items-center justify-center p-4">
                   <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
-                      <h3 className="text-xl font-bold">Otimizar</h3>
+                      <h3 className="text-xl font-bold">Otimizar Rota</h3>
                       <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><span className="font-bold">Usar GPS Atual</span></button>
                       <div className="flex gap-2"><input type="text" className="flex-1 p-3 bg-slate-50 rounded-xl border text-sm" placeholder="Ou digite endereço..." value={customStartAddr} onChange={e => setCustomStartAddr(e.target.value)}/><button onClick={confirmAddressStart} disabled={isGeocoding} className="bg-slate-900 text-white p-3 rounded-xl">{isGeocoding ? <Loader2 className="animate-spin"/> : <Check/>}</button></div>
                       <button onClick={() => setShowStartModal(false)} className="w-full text-slate-400 font-bold">Cancelar</button>
@@ -443,12 +435,12 @@ export default function App() {
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
                   <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
                   <div className="flex gap-2">
-                      <button onClick={() => { setShowMap(!showMap); setIsNavigating(false); }} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
+                      <button onClick={() => { setShowMap(!showMap); setIsNavigating(false); }} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
                       <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
                   </div>
               </div>
               
-              {!searchQuery && !showMap && (
+              {!showMap && (
                   <div className="flex gap-3">
                       <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
@@ -469,7 +461,7 @@ export default function App() {
                           mapContainerStyle={mapContainerStyle}
                           center={userPos || { lat: -23.55, lng: -46.63 }}
                           zoom={16}
-                          options={{ ...mapOptions, heading: userHeading, tilt: isNavigating ? 45 : 0 }}
+                          options={{ ...defaultMapOptions, heading: userHeading, tilt: isNavigating ? 45 : 0 }}
                           onLoad={(map) => { setMapInstance(map); mapRef.current = map; }}
                       >
                           {directionsResponse && <DirectionsRenderer directions={directionsResponse} options={{ suppressMarkers: true, polylineOptions: { strokeColor: "#2563EB", strokeWeight: 5 } }} />}
@@ -483,8 +475,6 @@ export default function App() {
                                 onClick={() => setSelectedMarker(g)}
                               />
                           ))}
-                          
-                          {/* Marcador do Usuário (Carro) */}
                           {userPos && <MarkerF position={{ lat: userPos.lat, lng: userPos.lng }} icon={getUserIcon(userHeading)} zIndex={2000} />}
 
                           {selectedMarker && (
@@ -518,8 +508,8 @@ export default function App() {
                   {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
-                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {safeStr(nextGroup.mainName)}</h3>
-                          <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
+                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{safeStr(nextGroup.mainName)}</h3>
+                          <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes</p>
                           <div className="space-y-3 border-t border-slate-100 pt-3">
                               {nextGroup.items.map((item, idx) => {
                                   if (item.status !== 'pending') return null;
@@ -549,8 +539,8 @@ export default function App() {
                               <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
                                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : (idx + 1)}</div>
                                   <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {safeStr(group.mainName)}</h4></div>
-                                      <p className="text-xs text-slate-400 truncate">{group.items.length} pacotes a serem entregues nessa parada</p>
+                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">{safeStr(group.mainName)}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div>
+                                      <p className="text-xs text-slate-400 truncate">{group.mainAddress}</p>
                                   </div>
                                   {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 rounded-full"><Check size={18}/></button>)}
                               </div>
@@ -558,7 +548,7 @@ export default function App() {
                                   <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
                                       {group.items.map((item, subIdx) => (
                                           <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                              <div className="mb-2"><span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span><span className="text-sm font-bold text-slate-700 block">{safeStr(item.address)}</span></div>
+                                              <div className="mb-2"><span className="text-[10px] font-bold text-blue-500 block">PARADA #{subIdx + 1}</span><span className="text-sm font-bold text-slate-700 block">{safeStr(item.address)}</span></div>
                                               {item.status === 'pending' ? (<div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button></div>) : (<span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>)}
                                           </div>
                                       ))}
