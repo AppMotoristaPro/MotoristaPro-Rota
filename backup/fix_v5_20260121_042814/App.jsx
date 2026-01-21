@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx';
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v33_hotfix';
+const DB_KEY = 'mp_db_v32_metrics';
 const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 // --- HELPERS ---
@@ -33,6 +33,7 @@ const groupStopsByStopName = (stops) => {
         groups[key].items.push(stop);
     });
     
+    // Preserva ordem original
     const ordered = [];
     const seen = new Set();
     stops.forEach(stop => {
@@ -40,6 +41,7 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if(g) {
+                // Lógica de Status do Grupo
                 const t = g.items.length;
                 const s = g.items.filter(i => i.status === 'success').length;
                 const f = g.items.filter(i => i.status === 'failed').length;
@@ -55,6 +57,7 @@ const groupStopsByStopName = (stops) => {
     return ordered;
 };
 
+// Otimizador
 const optimizeRollingChain = async (allStops, startPos) => {
     let unvisited = [...allStops];
     let finalRoute = [];
@@ -106,7 +109,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   
-  // Directions API Response & Metrics
+  // Directions API Response
   const [directionsResponse, setDirectionsResponse] = useState(null);
   const [realMetrics, setRealMetrics] = useState(null);
 
@@ -137,6 +140,7 @@ export default function App() {
       } catch (e) { return null; }
   };
 
+  // --- ARQUIVOS ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -177,26 +181,46 @@ export default function App() {
       setNewRouteName(''); setTempStops([]); setView('home');
   };
 
+  // --- LOGICA DE EDIÇÃO MANUAL (Item 4) ---
   const handleReorder = (oldGroupIndex, newGroupIndex) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
       
       const currentStops = [...routes[rIdx].stops];
-      const groups = groupStopsByStopName(currentStops); 
+      const groups = groupStopsByStopName(currentStops); // Pega os grupos atuais
       
+      // Validação de índices
       if(newGroupIndex < 0 || newGroupIndex >= groups.length || oldGroupIndex < 0 || oldGroupIndex >= groups.length) return;
 
       const movingGroup = groups[oldGroupIndex];
-      const remainingStops = currentStops.filter(s => !movingGroup.items.some(i => i.id === s.id));
-      const targetGroup = groups[newGroupIndex];
       
+      // Remove todos os itens do grupo da lista plana original
+      const remainingStops = currentStops.filter(s => !movingGroup.items.some(i => i.id === s.id));
+      
+      // Precisamos encontrar onde inserir na lista plana.
+      // A estratégia é: pegar o "grupo alvo" (onde queremos inserir) e achar o índice do primeiro item dele na lista plana.
+      const targetGroup = groups[newGroupIndex];
+      const targetItemIndex = remainingStops.findIndex(s => targetGroup.items.some(i => i.id === s.id));
+      
+      // Insere os itens do grupo movido na nova posição
       let newStopsList = [];
       if (newGroupIndex > oldGroupIndex) {
+           // Movendo para baixo: insere DEPOIS do grupo alvo
+           // Achar o fim do grupo alvo
            const targetLastIndex = remainingStops.reduce((last, curr, idx) => targetGroup.items.some(i => i.id === curr.id) ? idx : last, -1);
-           newStopsList = [...remainingStops.slice(0, targetLastIndex + 1), ...movingGroup.items, ...remainingStops.slice(targetLastIndex + 1)];
+           newStopsList = [
+               ...remainingStops.slice(0, targetLastIndex + 1),
+               ...movingGroup.items,
+               ...remainingStops.slice(targetLastIndex + 1)
+           ];
       } else {
+           // Movendo para cima: insere ANTES do grupo alvo
            const targetFirstIndex = remainingStops.findIndex(s => targetGroup.items.some(i => i.id === s.id));
-           newStopsList = [...remainingStops.slice(0, targetFirstIndex), ...movingGroup.items, ...remainingStops.slice(targetFirstIndex)];
+           newStopsList = [
+               ...remainingStops.slice(0, targetFirstIndex),
+               ...movingGroup.items,
+               ...remainingStops.slice(targetFirstIndex)
+           ];
       }
 
       const updatedRoutes = [...routes];
@@ -207,7 +231,7 @@ export default function App() {
 
   const optimizeRoute = async () => {
       setIsOptimizing(true);
-      let pos = userPos || await getCurrentLocation();
+      let pos = userPos || await getCurrentLocation(true);
       if (!pos) { setIsOptimizing(false); return alert("Sem GPS!"); }
 
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
@@ -215,12 +239,13 @@ export default function App() {
       const pending = currentRoute.stops.filter(s => s.status === 'pending');
       const done = currentRoute.stops.filter(s => s.status !== 'pending');
       
+      // Agrupa para otimizar locais, não pacotes
       const groups = groupStopsByStopName(pending);
       const locations = groups.map(g => ({ lat: g.lat, lng: g.lng, items: g.items }));
       
       try {
           const optimizedLocs = await optimizeRollingChain(locations, pos);
-          const flatOptimized = optimizedLocs.flatMap(l => l.items);
+          const flatOptimized = optimizedLocs.flatMap(l => l.items); // Desagrupa de volta para lista plana
           
           const updated = [...routes];
           updated[rIdx] = { ...updated[rIdx], stops: [...done, ...flatOptimized], optimized: true };
@@ -232,13 +257,11 @@ export default function App() {
 
   const setStatus = (stopId, status) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
-      if (rIdx === -1) return;
-      const updatedRoutes = [...routes];
-      const route = updatedRoutes[rIdx];
-      const stopIndex = route.stops.findIndex(s => s.id === stopId);
-      if (stopIndex !== -1) {
-          route.stops[stopIndex].status = status;
-          setRoutes(updatedRoutes);
+      const updated = [...routes];
+      const sIdx = updated[rIdx].stops.findIndex(s => s.id === stopId);
+      if (sIdx !== -1) {
+          updated[rIdx].stops[sIdx].status = status;
+          setRoutes(updated);
           if (status === 'success') showToast("Entregue!");
       }
   };
@@ -246,8 +269,6 @@ export default function App() {
   const openNav = (lat, lng) => {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
-
-  const toggleGroup = (id) => setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
@@ -264,6 +285,7 @@ export default function App() {
           }, (res, status) => {
               if (status === 'OK') {
                   setDirectionsResponse(res);
+                  // Extrai dados reais
                   const leg = res.routes[0].legs[0];
                   if(leg) {
                       setRealMetrics({
@@ -282,19 +304,15 @@ export default function App() {
               <h1 className="text-3xl font-bold text-slate-900">Rotas</h1>
               <div className="bg-white p-2 rounded-full shadow-sm"><Package className="text-slate-400"/></div>
           </div>
-          {routes.length === 0 ? <div className="text-center mt-32 opacity-40"><MapIcon size={48} className="mx-auto mb-4"/><p>Nenhuma rota</p></div> : 
-              <div className="space-y-4">
-                  {routes.map(r => (
-                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer mb-4">
-                          <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
-                          <div className="flex gap-4 text-sm text-slate-500 mt-2">
-                              <span>{r.stops.length} vols</span>
-                              {r.optimized && <span className="text-green-600 font-bold">Otimizada</span>}
-                          </div>
-                      </div>
-                  ))}
+          {routes.map(r => (
+              <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer mb-4">
+                  <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
+                  <div className="flex gap-4 text-sm text-slate-500 mt-2">
+                      <span>{r.stops.length} vols</span>
+                      {r.optimized && <span className="text-green-600 font-bold">Otimizada</span>}
+                  </div>
               </div>
-          }
+          ))}
           <button onClick={() => setView('create')} className="fixed bottom-8 right-8 w-16 h-16 rounded-full fab-main flex items-center justify-center"><Plus size={32}/></button>
       </div>
   );
@@ -329,6 +347,7 @@ export default function App() {
                   </div>
               </div>
               
+              {/* MÉTRICAS REAIS DO GOOGLE */}
               {activeRoute.optimized && realMetrics && !showMap && (
                   <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
                       <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{realMetrics.dist}</span></div>
@@ -341,12 +360,12 @@ export default function App() {
               
               {!showMap && (
                   <div className="flex gap-3">
-                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
-                              <Navigation size={18}/> Iniciar Rota
+                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-gradient-green shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
+                              <Navigation size={18}/> Navegar
                           </button>
                       )}
                   </div>
@@ -371,9 +390,9 @@ export default function App() {
                   activeRoute={activeRoute}
                   searchQuery={searchQuery}
                   expandedGroups={expandedGroups}
-                  toggleGroup={toggleGroup} // Passando explicitamente aqui
+                  toggleGroup={toggleGroup}
                   setStatus={setStatus}
-                  onReorder={handleReorder}
+                  onReorder={handleReorder} // NOVA PROP
               />
           )}
       </div>

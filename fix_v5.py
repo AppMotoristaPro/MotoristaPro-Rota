@@ -6,24 +6,26 @@ import subprocess
 # --- CONFIGURAÇÕES ---
 BACKUP_DIR = "backup"
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"feature_edit_v4_{TIMESTAMP}")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"fix_v5_{TIMESTAMP}")
 
-# --- NOVOS ARQUIVOS ---
-
+# --- ARQUIVOS CORRIGIDOS ---
 FILES_TO_WRITE = {
     "src/components/RouteList.jsx": """import React, { useState } from 'react';
 import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save } from 'lucide-react';
 
-export default function RouteList({ 
-    groupedStops, 
-    nextGroup, 
-    activeRoute, 
-    searchQuery, 
-    expandedGroups, 
-    toggleGroup, 
-    setStatus,
-    onReorder // Nova prop para reordenar
-}) {
+export default function RouteList(props) {
+    // Desestruturação segura das props
+    const { 
+        groupedStops = [], 
+        nextGroup = null, 
+        activeRoute = {}, 
+        searchQuery = '', 
+        expandedGroups = {}, 
+        toggleGroup, 
+        setStatus,
+        onReorder 
+    } = props;
+
     const [isEditing, setIsEditing] = useState(false);
     const [editValues, setEditValues] = useState({});
 
@@ -35,7 +37,6 @@ export default function RouteList({
         });
     };
 
-    // Filtra visualização
     const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
         safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
         safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
@@ -48,16 +49,23 @@ export default function RouteList({
     const handleInputBlur = (group, oldIndex) => {
         const newIndex = parseInt(editValues[group.id]);
         if (!isNaN(newIndex) && newIndex > 0 && newIndex <= groupedStops.length) {
-            // Ajusta para índice 0-based
             onReorder(oldIndex, newIndex - 1); 
         }
         setEditValues(prev => ({...prev, [group.id]: ''}));
     };
 
+    // Função wrapper segura para evitar o crash ReferenceError
+    const handleToggle = (id) => {
+        if (typeof toggleGroup === 'function') {
+            toggleGroup(id);
+        } else {
+            console.error("toggleGroup function is missing!");
+        }
+    };
+
     return (
         <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3 relative">
             
-            {/* BOTÃO FLUTUANTE DE EDIÇÃO */}
             {!searchQuery && (
                 <div className="flex justify-end mb-2">
                     <button 
@@ -71,7 +79,6 @@ export default function RouteList({
                 </div>
             )}
 
-            {/* DESTAQUE (SÓ APARECE SE NÃO ESTIVER EDITANDO) */}
             {!isEditing && !searchQuery && nextGroup && activeRoute.optimized && (
                 <div className="modern-card p-6 border-l-8 border-blue-600 bg-white relative mb-6 shadow-lg">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">ALVO ATUAL</div>
@@ -111,9 +118,8 @@ export default function RouteList({
             {filteredGroups.map((group, idx) => (
                 (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) ? null : (
                     <div key={group.id} className={`modern-card border-l-4 ${group.status === 'success' ? 'border-green-500 opacity-60' : 'border-slate-200'}`}>
-                        <div onClick={() => !isEditing && toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
+                        <div onClick={() => !isEditing && handleToggle(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
                             
-                            {/* MODO EDIÇÃO: INPUT AO INVÉS DE BOLINHA */}
                             {isEditing ? (
                                 <input 
                                     type="number" 
@@ -138,6 +144,26 @@ export default function RouteList({
                             
                             {!isEditing && group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp/> : <ChevronDown/>) : null}
                         </div>
+                        {(expandedGroups[group.id] || (isEditing === false && group.items.length > 1 && expandedGroups[group.id])) && (
+                            <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
+                                {group.items.map((item) => (
+                                    <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
+                                        <div className="mb-2">
+                                            <span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span>
+                                            <span className="text-sm font-bold text-slate-700 block">{item.address}</span>
+                                        </div>
+                                        {item.status === 'pending' ? (
+                                            <div className="flex gap-2 w-full">
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button>
+                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )
             ))}
@@ -160,7 +186,7 @@ import * as XLSX from 'xlsx';
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v32_metrics';
+const DB_KEY = 'mp_db_v33_hotfix';
 const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 // --- HELPERS ---
@@ -182,7 +208,6 @@ const groupStopsByStopName = (stops) => {
         groups[key].items.push(stop);
     });
     
-    // Preserva ordem original
     const ordered = [];
     const seen = new Set();
     stops.forEach(stop => {
@@ -190,7 +215,6 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if(g) {
-                // Lógica de Status do Grupo
                 const t = g.items.length;
                 const s = g.items.filter(i => i.status === 'success').length;
                 const f = g.items.filter(i => i.status === 'failed').length;
@@ -206,7 +230,6 @@ const groupStopsByStopName = (stops) => {
     return ordered;
 };
 
-// Otimizador
 const optimizeRollingChain = async (allStops, startPos) => {
     let unvisited = [...allStops];
     let finalRoute = [];
@@ -258,7 +281,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   
-  // Directions API Response
+  // Directions API Response & Metrics
   const [directionsResponse, setDirectionsResponse] = useState(null);
   const [realMetrics, setRealMetrics] = useState(null);
 
@@ -289,7 +312,6 @@ export default function App() {
       } catch (e) { return null; }
   };
 
-  // --- ARQUIVOS ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -330,46 +352,26 @@ export default function App() {
       setNewRouteName(''); setTempStops([]); setView('home');
   };
 
-  // --- LOGICA DE EDIÇÃO MANUAL (Item 4) ---
   const handleReorder = (oldGroupIndex, newGroupIndex) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
       
       const currentStops = [...routes[rIdx].stops];
-      const groups = groupStopsByStopName(currentStops); // Pega os grupos atuais
+      const groups = groupStopsByStopName(currentStops); 
       
-      // Validação de índices
       if(newGroupIndex < 0 || newGroupIndex >= groups.length || oldGroupIndex < 0 || oldGroupIndex >= groups.length) return;
 
       const movingGroup = groups[oldGroupIndex];
-      
-      // Remove todos os itens do grupo da lista plana original
       const remainingStops = currentStops.filter(s => !movingGroup.items.some(i => i.id === s.id));
-      
-      // Precisamos encontrar onde inserir na lista plana.
-      // A estratégia é: pegar o "grupo alvo" (onde queremos inserir) e achar o índice do primeiro item dele na lista plana.
       const targetGroup = groups[newGroupIndex];
-      const targetItemIndex = remainingStops.findIndex(s => targetGroup.items.some(i => i.id === s.id));
       
-      // Insere os itens do grupo movido na nova posição
       let newStopsList = [];
       if (newGroupIndex > oldGroupIndex) {
-           // Movendo para baixo: insere DEPOIS do grupo alvo
-           // Achar o fim do grupo alvo
            const targetLastIndex = remainingStops.reduce((last, curr, idx) => targetGroup.items.some(i => i.id === curr.id) ? idx : last, -1);
-           newStopsList = [
-               ...remainingStops.slice(0, targetLastIndex + 1),
-               ...movingGroup.items,
-               ...remainingStops.slice(targetLastIndex + 1)
-           ];
+           newStopsList = [...remainingStops.slice(0, targetLastIndex + 1), ...movingGroup.items, ...remainingStops.slice(targetLastIndex + 1)];
       } else {
-           // Movendo para cima: insere ANTES do grupo alvo
            const targetFirstIndex = remainingStops.findIndex(s => targetGroup.items.some(i => i.id === s.id));
-           newStopsList = [
-               ...remainingStops.slice(0, targetFirstIndex),
-               ...movingGroup.items,
-               ...remainingStops.slice(targetFirstIndex)
-           ];
+           newStopsList = [...remainingStops.slice(0, targetFirstIndex), ...movingGroup.items, ...remainingStops.slice(targetFirstIndex)];
       }
 
       const updatedRoutes = [...routes];
@@ -380,7 +382,7 @@ export default function App() {
 
   const optimizeRoute = async () => {
       setIsOptimizing(true);
-      let pos = userPos || await getCurrentLocation(true);
+      let pos = userPos || await getCurrentLocation();
       if (!pos) { setIsOptimizing(false); return alert("Sem GPS!"); }
 
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
@@ -388,13 +390,12 @@ export default function App() {
       const pending = currentRoute.stops.filter(s => s.status === 'pending');
       const done = currentRoute.stops.filter(s => s.status !== 'pending');
       
-      // Agrupa para otimizar locais, não pacotes
       const groups = groupStopsByStopName(pending);
       const locations = groups.map(g => ({ lat: g.lat, lng: g.lng, items: g.items }));
       
       try {
           const optimizedLocs = await optimizeRollingChain(locations, pos);
-          const flatOptimized = optimizedLocs.flatMap(l => l.items); // Desagrupa de volta para lista plana
+          const flatOptimized = optimizedLocs.flatMap(l => l.items);
           
           const updated = [...routes];
           updated[rIdx] = { ...updated[rIdx], stops: [...done, ...flatOptimized], optimized: true };
@@ -406,11 +407,13 @@ export default function App() {
 
   const setStatus = (stopId, status) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
-      const updated = [...routes];
-      const sIdx = updated[rIdx].stops.findIndex(s => s.id === stopId);
-      if (sIdx !== -1) {
-          updated[rIdx].stops[sIdx].status = status;
-          setRoutes(updated);
+      if (rIdx === -1) return;
+      const updatedRoutes = [...routes];
+      const route = updatedRoutes[rIdx];
+      const stopIndex = route.stops.findIndex(s => s.id === stopId);
+      if (stopIndex !== -1) {
+          route.stops[stopIndex].status = status;
+          setRoutes(updatedRoutes);
           if (status === 'success') showToast("Entregue!");
       }
   };
@@ -418,6 +421,8 @@ export default function App() {
   const openNav = (lat, lng) => {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
+
+  const toggleGroup = (id) => setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
@@ -434,7 +439,6 @@ export default function App() {
           }, (res, status) => {
               if (status === 'OK') {
                   setDirectionsResponse(res);
-                  // Extrai dados reais
                   const leg = res.routes[0].legs[0];
                   if(leg) {
                       setRealMetrics({
@@ -453,15 +457,19 @@ export default function App() {
               <h1 className="text-3xl font-bold text-slate-900">Rotas</h1>
               <div className="bg-white p-2 rounded-full shadow-sm"><Package className="text-slate-400"/></div>
           </div>
-          {routes.map(r => (
-              <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer mb-4">
-                  <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
-                  <div className="flex gap-4 text-sm text-slate-500 mt-2">
-                      <span>{r.stops.length} vols</span>
-                      {r.optimized && <span className="text-green-600 font-bold">Otimizada</span>}
-                  </div>
+          {routes.length === 0 ? <div className="text-center mt-32 opacity-40"><MapIcon size={48} className="mx-auto mb-4"/><p>Nenhuma rota</p></div> : 
+              <div className="space-y-4">
+                  {routes.map(r => (
+                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer mb-4">
+                          <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
+                          <div className="flex gap-4 text-sm text-slate-500 mt-2">
+                              <span>{r.stops.length} vols</span>
+                              {r.optimized && <span className="text-green-600 font-bold">Otimizada</span>}
+                          </div>
+                      </div>
+                  ))}
               </div>
-          ))}
+          }
           <button onClick={() => setView('create')} className="fixed bottom-8 right-8 w-16 h-16 rounded-full fab-main flex items-center justify-center"><Plus size={32}/></button>
       </div>
   );
@@ -496,7 +504,6 @@ export default function App() {
                   </div>
               </div>
               
-              {/* MÉTRICAS REAIS DO GOOGLE */}
               {activeRoute.optimized && realMetrics && !showMap && (
                   <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
                       <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{realMetrics.dist}</span></div>
@@ -509,12 +516,12 @@ export default function App() {
               
               {!showMap && (
                   <div className="flex gap-3">
-                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-gradient-green shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
-                              <Navigation size={18}/> Navegar
+                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
+                              <Navigation size={18}/> Iniciar Rota
                           </button>
                       )}
                   </div>
@@ -539,9 +546,9 @@ export default function App() {
                   activeRoute={activeRoute}
                   searchQuery={searchQuery}
                   expandedGroups={expandedGroups}
-                  toggleGroup={toggleGroup}
+                  toggleGroup={toggleGroup} // Passando explicitamente aqui
                   setStatus={setStatus}
-                  onReorder={handleReorder} // NOVA PROP
+                  onReorder={handleReorder}
               />
           )}
       </div>
@@ -554,31 +561,31 @@ def run_command(cmd):
     try:
         subprocess.run(cmd, check=True, shell=True)
     except Exception as e:
-        print(f"Erro no comando {cmd}: {e}")
+        print(f"Erro comando: {cmd}")
 
 def main():
-    print(f"--- Backup em {CURRENT_BACKUP_PATH} ---")
+    print(f"--- Iniciando Correção Crítica (V5) ---")
     if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
     os.makedirs(CURRENT_BACKUP_PATH)
     
+    # Backup
     for f in ["src/components/RouteList.jsx", "src/App.jsx"]:
-        if os.path.exists(f):
-            dest = os.path.join(CURRENT_BACKUP_PATH, os.path.basename(f))
-            shutil.copy2(f, dest)
+        if os.path.exists(f): shutil.copy2(f, CURRENT_BACKUP_PATH)
 
-    print("--- Escrevendo arquivos V4 ---")
+    # Escrevendo arquivos
     for path, content in FILES_TO_WRITE.items():
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
+        print(f"Arquivo corrigido: {path}")
 
-    print("--- Git Push ---")
+    # Commit
     run_command("git add .")
-    run_command(f'git commit -m "Update v4: Edição Manual e Métricas Google - {TIMESTAMP}"')
+    run_command(f'git commit -m "HOTFIX v5: Correção ReferenceError toggleGroup - {TIMESTAMP}"')
     run_command("git push")
 
-    print("--- Auto-Destruição ---")
+    # Limpeza
     os.remove(__file__)
-    print("Sucesso.")
+    print("Correção aplicada com sucesso.")
 
 if __name__ == "__main__":
     main()

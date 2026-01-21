@@ -1,19 +1,16 @@
 import React, { useState } from 'react';
 import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save } from 'lucide-react';
 
-export default function RouteList(props) {
-    // Desestruturação segura das props
-    const { 
-        groupedStops = [], 
-        nextGroup = null, 
-        activeRoute = {}, 
-        searchQuery = '', 
-        expandedGroups = {}, 
-        toggleGroup, 
-        setStatus,
-        onReorder 
-    } = props;
-
+export default function RouteList({ 
+    groupedStops, 
+    nextGroup, 
+    activeRoute, 
+    searchQuery, 
+    expandedGroups, 
+    toggleGroup, 
+    setStatus,
+    onReorder // Nova prop para reordenar
+}) {
     const [isEditing, setIsEditing] = useState(false);
     const [editValues, setEditValues] = useState({});
 
@@ -25,6 +22,7 @@ export default function RouteList(props) {
         });
     };
 
+    // Filtra visualização
     const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
         safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
         safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
@@ -37,23 +35,16 @@ export default function RouteList(props) {
     const handleInputBlur = (group, oldIndex) => {
         const newIndex = parseInt(editValues[group.id]);
         if (!isNaN(newIndex) && newIndex > 0 && newIndex <= groupedStops.length) {
+            // Ajusta para índice 0-based
             onReorder(oldIndex, newIndex - 1); 
         }
         setEditValues(prev => ({...prev, [group.id]: ''}));
     };
 
-    // Função wrapper segura para evitar o crash ReferenceError
-    const handleToggle = (id) => {
-        if (typeof toggleGroup === 'function') {
-            toggleGroup(id);
-        } else {
-            console.error("toggleGroup function is missing!");
-        }
-    };
-
     return (
         <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3 relative">
             
+            {/* BOTÃO FLUTUANTE DE EDIÇÃO */}
             {!searchQuery && (
                 <div className="flex justify-end mb-2">
                     <button 
@@ -67,6 +58,7 @@ export default function RouteList(props) {
                 </div>
             )}
 
+            {/* DESTAQUE (SÓ APARECE SE NÃO ESTIVER EDITANDO) */}
             {!isEditing && !searchQuery && nextGroup && activeRoute.optimized && (
                 <div className="modern-card p-6 border-l-8 border-blue-600 bg-white relative mb-6 shadow-lg">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">ALVO ATUAL</div>
@@ -106,8 +98,9 @@ export default function RouteList(props) {
             {filteredGroups.map((group, idx) => (
                 (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) ? null : (
                     <div key={group.id} className={`modern-card border-l-4 ${group.status === 'success' ? 'border-green-500 opacity-60' : 'border-slate-200'}`}>
-                        <div onClick={() => !isEditing && handleToggle(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
+                        <div onClick={() => !isEditing && toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
                             
+                            {/* MODO EDIÇÃO: INPUT AO INVÉS DE BOLINHA */}
                             {isEditing ? (
                                 <input 
                                     type="number" 
@@ -132,26 +125,6 @@ export default function RouteList(props) {
                             
                             {!isEditing && group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp/> : <ChevronDown/>) : null}
                         </div>
-                        {(expandedGroups[group.id] || (isEditing === false && group.items.length > 1 && expandedGroups[group.id])) && (
-                            <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
-                                {group.items.map((item) => (
-                                    <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                        <div className="mb-2">
-                                            <span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span>
-                                            <span className="text-sm font-bold text-slate-700 block">{item.address}</span>
-                                        </div>
-                                        {item.status === 'pending' ? (
-                                            <div className="flex gap-2 w-full">
-                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button>
-                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button>
-                                            </div>
-                                        ) : (
-                                            <span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
                     </div>
                 )
             ))}
