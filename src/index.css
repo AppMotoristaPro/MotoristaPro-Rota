@@ -5,62 +5,75 @@
 
 body {
   margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #F1F5F9; /* Cinza de fundo mais profissional */
+  font-family: 'Inter', sans-serif;
+  background-color: #F8FAFC;
   color: #0F172A;
   -webkit-tap-highlight-color: transparent;
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Container do Mapa */
 .map-container { width: 100%; height: 100%; }
 
-/* Card Estilo Clássico (Limpo) */
-.route-card {
+/* Card de Destaque (Próxima Parada) */
+.highlight-card {
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  border: 1px solid #E2E8F0;
-  transition: all 0.2s ease;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px -5px rgba(37, 99, 235, 0.15); /* Sombra Azulada */
+  border: 2px solid #3B82F6;
   position: relative;
   overflow: hidden;
+  transition: all 0.3s ease;
 }
-.route-card:active { transform: scale(0.99); background-color: #F8FAFC; }
 
-/* Status Lateral */
-.status-bar-pending { border-left: 5px solid #3B82F6; }
-.status-bar-success { border-left: 5px solid #10B981; background-color: #F0FDF4; }
-.status-bar-failed { border-left: 5px solid #EF4444; background-color: #FEF2F2; }
-.status-bar-partial { border-left: 5px solid #F59E0B; background-color: #FFFBEB; }
-
-/* Botão Fixo Inferior (Floating Action) */
-.bottom-action-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+/* Card Normal */
+.route-card {
   background: white;
-  padding: 16px;
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
-  box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
-  z-index: 50;
-  display: flex;
-  gap: 10px;
-}
-
-.btn-primary {
-  background: #2563EB;
-  color: white;
-  font-weight: 700;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-}
-.btn-secondary {
-  background: #F8FAFC;
-  color: #475569;
+  border-radius: 14px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.03);
   border: 1px solid #E2E8F0;
-  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.route-card:active { transform: scale(0.98); }
+
+/* Cores de Status */
+.status-bar-pending { border-left: 5px solid #CBD5E1; }
+.status-bar-success { border-left: 5px solid #10B981; opacity: 0.6; background: #F0FDF4; }
+.status-bar-failed { border-left: 5px solid #EF4444; opacity: 0.6; background: #FEF2F2; }
+
+/* Botões de Ação (Destaque) */
+.btn-action-success {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+}
+.btn-action-fail {
+  background: white;
+  color: #EF4444;
+  border: 2px solid #FEE2E2;
 }
 
-/* Toast */
-.toast-anim { animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-@keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+/* Animação de Loading (Overlay) */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(5px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Botão Otimizar Pulsante */
+.btn-optimize-highlight {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.7);
+  animation: pulse-black 2s infinite;
+}
+@keyframes pulse-black {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(15, 23, 42, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 23, 42, 0); }
+}

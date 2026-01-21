@@ -1,4 +1,97 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import os
+import shutil
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# 1. CSS (Animações e Estilos de Destaque)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.map-container { width: 100%; height: 100%; }
+
+/* Card de Destaque (Próxima Parada) */
+.highlight-card {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px -5px rgba(37, 99, 235, 0.15); /* Sombra Azulada */
+  border: 2px solid #3B82F6;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+/* Card Normal */
+.route-card {
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+  border: 1px solid #E2E8F0;
+  transition: all 0.2s ease;
+}
+.route-card:active { transform: scale(0.98); }
+
+/* Cores de Status */
+.status-bar-pending { border-left: 5px solid #CBD5E1; }
+.status-bar-success { border-left: 5px solid #10B981; opacity: 0.6; background: #F0FDF4; }
+.status-bar-failed { border-left: 5px solid #EF4444; opacity: 0.6; background: #FEF2F2; }
+
+/* Botões de Ação (Destaque) */
+.btn-action-success {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+}
+.btn-action-fail {
+  background: white;
+  color: #EF4444;
+  border: 2px solid #FEE2E2;
+}
+
+/* Animação de Loading (Overlay) */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(5px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Botão Otimizar Pulsante */
+.btn-optimize-highlight {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.7);
+  animation: pulse-black 2s infinite;
+}
+@keyframes pulse-black {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(15, 23, 42, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 23, 42, 0); }
+}
+'''
+
+# 2. APP.JSX (Lógica V51 Completa)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -11,7 +104,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v51_top_ux';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS ---
 const safeStr = (val) => {
@@ -462,3 +555,29 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V51 (TOP TIER UX) - {APP_NAME}")
+    
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando arquivos...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+        
+    with open("src/index.css", 'w', encoding='utf-8') as f:
+        f.write(files_content['src/index.css'])
+
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V51 Animation, Highlight Card, Import UX"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
