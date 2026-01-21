@@ -11,7 +11,7 @@ export default function RouteList(props) {
         toggleGroup, 
         setStatus,
         onReorder,
-        onEditAddress
+        onEditAddress // Nova Prop
     } = props;
 
     const [isEditing, setIsEditing] = useState(false);
@@ -25,10 +25,9 @@ export default function RouteList(props) {
         });
     };
 
-    // --- CORREÇÃO AQUI: Preenche o prompt com o endereço atual ---
     const handleEditAddressClick = (e, item) => {
         e.stopPropagation();
-        const newAddr = prompt("Editar Endereço:", item.address); // Agora com valor padrão
+        const newAddr = prompt("Editar Endereço:", item.address);
         if (newAddr && newAddr.trim() !== "") {
             onEditAddress(item.id, newAddr);
         }
