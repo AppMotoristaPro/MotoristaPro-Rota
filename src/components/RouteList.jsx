@@ -25,10 +25,11 @@ export default function RouteList(props) {
         });
     };
 
-    // --- CORREÇÃO AQUI: Preenche o prompt com o endereço atual ---
+    // --- CORREÇÃO: Prompt com valor default ---
     const handleEditAddressClick = (e, item) => {
         e.stopPropagation();
-        const newAddr = prompt("Editar Endereço:", item.address); // Agora com valor padrão
+        // O segundo argumento do prompt preenche a caixa
+        const newAddr = prompt("Editar Endereço:", item.address); 
         if (newAddr && newAddr.trim() !== "") {
             onEditAddress(item.id, newAddr);
         }
@@ -67,10 +68,12 @@ export default function RouteList(props) {
                 </div>
             )}
 
-            {!isEditing && !searchQuery && nextGroup && activeRoute.optimized && (
+            {!isEditing && !searchQuery && nextGroup && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima Parada</div>
-                    <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">Parada: {safeStr(nextGroup.mainName)}</h3>
+                    <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
+                       #{nextGroup.displayOrder} - {safeStr(nextGroup.mainName)}
+                    </h3>
                     <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                     
                     {nextGroup.items.filter(i => i.status === 'pending').length > 1 && (
@@ -106,19 +109,19 @@ export default function RouteList(props) {
             )}
 
             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2">
-                {isEditing ? 'Digite a nova posição' : 'Lista de Entregas'}
+                {isEditing ? 'Digite o número da parada' : 'Lista Sequencial'}
             </h4>
             
             {filteredGroups.map((group, idx) => (
-                (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) ? null : (
+                (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
                     <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
                         <div onClick={() => !isEditing && toggleGroup && toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
                             
                             {isEditing ? (
                                 <input 
                                     type="number" 
-                                    className="w-10 h-10 bg-slate-100 rounded-lg text-center font-bold text-base outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all"
-                                    placeholder={idx + 1}
+                                    className="w-12 h-10 bg-slate-100 rounded-lg text-center font-bold text-base outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all"
+                                    placeholder={group.displayOrder}
                                     value={editValues[group.id] !== undefined ? editValues[group.id] : ''}
                                     onChange={(e) => handleInputChange(group.id, e.target.value)}
                                     onBlur={() => handleInputBlur(group, idx)}
@@ -127,12 +130,12 @@ export default function RouteList(props) {
                                 />
                             ) : (
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                    {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
+                                    {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
                                 </div>
                             )}
 
                             <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada: {safeStr(group.mainName)}</h4>
+                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada {group.displayOrder}: {safeStr(group.mainName)}</h4>
                                 <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacote(s) • {safeStr(group.mainAddress)}</p>
                             </div>
                             

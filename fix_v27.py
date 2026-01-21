@@ -1,4 +1,345 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import datetime
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+BACKUP_DIR = "backup"
+TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v27_{TIMESTAMP}")
+
+# CHAVE API
+API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+# --- 1. MAP VIEW (COM BOTÕES DE AÇÃO) ---
+CODE_MAP_VIEW = """import React, { useState } from 'react';
+import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle } from 'lucide-react';
+
+const mapContainerStyle = { width: '100%', height: '100%' };
+const mapOptions = {
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false
+};
+
+const getMarkerIcon = (status, isCurrent) => {
+    let fillColor = "#3B82F6"; // Azul
+    if (status === 'success') fillColor = "#10B981"; // Verde
+    if (status === 'failed') fillColor = "#EF4444"; // Vermelho
+    if (isCurrent) fillColor = "#0F172A"; // Preto
+
+    return {
+        path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
+        fillColor: fillColor,
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: "#FFFFFF",
+        scale: isCurrent ? 2.2 : 1.6,
+        anchor: { x: 12, y: 22 },
+        labelOrigin: { x: 12, y: 10 }
+    };
+};
+
+export default function MapView({ 
+    userPos, 
+    groupedStops, 
+    directionsResponse, 
+    nextGroup, 
+    openNav,
+    isLoaded,
+    setStatus // Recebe a função de status
+}) {
+    const [selectedMarker, setSelectedMarker] = useState(null);
+    const [mapInstance, setMapInstance] = useState(null);
+
+    if (!isLoaded) return <div className="flex h-full items-center justify-center bg-slate-100"><Loader2 className="animate-spin text-slate-400"/></div>;
+
+    return (
+        <GoogleMap
+            mapContainerStyle={mapContainerStyle}
+            center={userPos || { lat: -23.55, lng: -46.63 }}
+            zoom={15}
+            options={mapOptions}
+            onLoad={setMapInstance}
+        >
+            {directionsResponse && (
+                <DirectionsRenderer 
+                    directions={directionsResponse} 
+                    options={{ 
+                        suppressMarkers: true, 
+                        polylineOptions: { strokeColor: "#2563EB", strokeWeight: 6, strokeOpacity: 0.8 } 
+                    }} 
+                />
+            )}
+            
+            {groupedStops.map((g) => (
+                <MarkerF 
+                    key={g.id} 
+                    position={{ lat: g.lat, lng: g.lng }}
+                    // Usa o displayOrder (número da planilha) se existir, senão usa índice
+                    label={{ text: String(g.displayOrder), color: "white", fontSize: "11px", fontWeight: "bold" }}
+                    icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
+                    onClick={() => setSelectedMarker(g)}
+                    zIndex={nextGroup && g.id === nextGroup.id ? 1000 : 1}
+                />
+            ))}
+            
+            {userPos && (
+                <MarkerF 
+                    position={{ lat: userPos.lat, lng: userPos.lng }} 
+                    icon={{
+                        path: window.google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: "#3B82F6",
+                        fillOpacity: 1,
+                        strokeWeight: 3,
+                        strokeColor: "white",
+                    }}
+                    zIndex={2000}
+                />
+            )}
+
+            {/* JANELA DE INFORMAÇÃO TURBINADA */}
+            {selectedMarker && (
+                <InfoWindowF 
+                    position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
+                    onCloseClick={() => setSelectedMarker(null)}
+                >
+                    <div className="p-1 min-w-[240px] max-w-[260px]">
+                        <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
+                            <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
+                            <div>
+                                <h3 className="font-bold text-sm text-slate-800 leading-tight">Parada {selectedMarker.displayOrder}</h3>
+                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
+                            </div>
+                        </div>
+                        
+                        {/* LISTA DE PACOTES DENTRO DA INFOWINDOW */}
+                        <div className="max-h-[150px] overflow-y-auto mb-2 space-y-2">
+                            {selectedMarker.items.map((item, idx) => (
+                                <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
+                                    <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
+                                    
+                                    {item.status === 'pending' ? (
+                                        <div className="flex gap-1">
+                                            <button 
+                                                onClick={() => setStatus(item.id, 'failed')}
+                                                className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"
+                                            >
+                                                <XCircle size={10}/> Falha
+                                            </button>
+                                            <button 
+                                                onClick={() => setStatus(item.id, 'success')}
+                                                className="flex-1 bg-green-500 text-white py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm"
+                                            >
+                                                <CheckCircle size={10}/> Entregue
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded w-full block text-center ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
+                                            {item.status === 'success' ? 'ENTREGUE' : 'FALHOU'}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        <button 
+                            onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} 
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm"
+                        >
+                            <Navigation size={14}/> Navegar
+                        </button>
+                    </div>
+                </InfoWindowF>
+            )}
+        </GoogleMap>
+    );
+}
+"""
+
+# --- 2. ROUTE LIST (COM EDIÇÃO PREENCHIDA) ---
+CODE_ROUTE_LIST = """import React, { useState } from 'react';
+import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save, Package, Pencil } from 'lucide-react';
+
+export default function RouteList(props) {
+    const { 
+        groupedStops = [], 
+        nextGroup = null, 
+        activeRoute = {}, 
+        searchQuery = '', 
+        expandedGroups = {}, 
+        toggleGroup, 
+        setStatus,
+        onReorder,
+        onEditAddress
+    } = props;
+
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValues, setEditValues] = useState({});
+
+    const safeStr = (val) => val ? String(val).trim() : '';
+
+    const setAllStatus = (items, status) => {
+        items.forEach(item => {
+            if (item.status === 'pending') setStatus(item.id, status);
+        });
+    };
+
+    // --- CORREÇÃO: Prompt com valor default ---
+    const handleEditAddressClick = (e, item) => {
+        e.stopPropagation();
+        // O segundo argumento do prompt preenche a caixa
+        const newAddr = prompt("Editar Endereço:", item.address); 
+        if (newAddr && newAddr.trim() !== "") {
+            onEditAddress(item.id, newAddr);
+        }
+    };
+
+    const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
+        safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
+        safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    const handleInputChange = (groupId, value) => {
+        setEditValues(prev => ({...prev, [groupId]: value}));
+    };
+
+    const handleInputBlur = (group, oldIndex) => {
+        const newIndex = parseInt(editValues[group.id]);
+        if (!isNaN(newIndex) && newIndex > 0 && newIndex <= groupedStops.length) {
+            onReorder(oldIndex, newIndex - 1); 
+        }
+        setEditValues(prev => ({...prev, [group.id]: ''}));
+    };
+
+    return (
+        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-safe space-y-3 relative bg-slate-50">
+            
+            {!searchQuery && (
+                <div className="flex justify-end mb-2">
+                    <button 
+                        onClick={() => setIsEditing(!isEditing)} 
+                        className={`text-[10px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 transition uppercase tracking-wider
+                        ${isEditing ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-500 border border-slate-200'}`}
+                    >
+                        {isEditing ? <Save size={12}/> : <Edit3 size={12}/>}
+                        {isEditing ? 'Salvar Ordem' : 'Editar Sequência'}
+                    </button>
+                </div>
+            )}
+
+            {!isEditing && !searchQuery && nextGroup && (
+                <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
+                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima Parada</div>
+                    <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
+                       #{nextGroup.displayOrder} - {safeStr(nextGroup.mainName)}
+                    </h3>
+                    <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
+                    
+                    {nextGroup.items.filter(i => i.status === 'pending').length > 1 && (
+                        <button 
+                            onClick={() => setAllStatus(nextGroup.items, 'success')}
+                            className="w-full mb-4 py-3 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-blue-100 active:scale-95 transition"
+                        >
+                            <Layers size={16}/> ENTREGAR TODOS ({nextGroup.items.filter(i => i.status === 'pending').length})
+                        </button>
+                    )}
+
+                    <div className="space-y-3 border-t border-slate-100 pt-3">
+                        {nextGroup.items.map((item, idx) => (
+                            item.status === 'pending' && (
+                                <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <Package size={14} className="text-blue-400"/>
+                                            <span className="text-xs font-bold text-slate-700">PACOTE {idx + 1}</span>
+                                        </div>
+                                        <button onClick={(e) => handleEditAddressClick(e, item)} className="text-slate-400 hover:text-blue-600"><Pencil size={12}/></button>
+                                    </div>
+                                    <p className="text-xs font-medium text-slate-600 mb-3 ml-6">{item.address}</p>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-3 bg-white border border-red-100 text-red-500 rounded-lg text-[10px] font-bold uppercase shadow-sm">Falha</button>
+                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-[2] py-3 bg-green-500 text-white rounded-lg text-[10px] font-bold uppercase shadow-md active:scale-95 transition">Entregue</button>
+                                    </div>
+                                </div>
+                            )
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2">
+                {isEditing ? 'Digite o número da parada' : 'Lista Sequencial'}
+            </h4>
+            
+            {filteredGroups.map((group, idx) => (
+                (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
+                    <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
+                        <div onClick={() => !isEditing && toggleGroup && toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
+                            
+                            {isEditing ? (
+                                <input 
+                                    type="number" 
+                                    className="w-12 h-10 bg-slate-100 rounded-lg text-center font-bold text-base outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all"
+                                    placeholder={group.displayOrder}
+                                    value={editValues[group.id] !== undefined ? editValues[group.id] : ''}
+                                    onChange={(e) => handleInputChange(group.id, e.target.value)}
+                                    onBlur={() => handleInputBlur(group, idx)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleInputBlur(group, idx)}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            ) : (
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                    {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
+                                </div>
+                            )}
+
+                            <div className="flex-1 min-w-0">
+                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada {group.displayOrder}: {safeStr(group.mainName)}</h4>
+                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacote(s) • {safeStr(group.mainAddress)}</p>
+                            </div>
+                            
+                            {!isEditing && group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
+                        </div>
+                        
+                        {(expandedGroups[group.id] || (isEditing === false && group.items.length > 1 && expandedGroups[group.id])) && (
+                            <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
+                                {group.items.map((item) => (
+                                    <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div>
+                                                <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
+                                                <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
+                                            </div>
+                                            {item.status === 'pending' && <button onClick={(e) => handleEditAddressClick(e, item)} className="text-slate-300 hover:text-blue-600"><Pencil size={12}/></button>}
+                                        </div>
+                                        {item.status === 'pending' ? (
+                                            <div className="flex gap-2 w-full">
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase">Falha</button>
+                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm">Entregue</button>
+                                            </div>
+                                        ) : (
+                                            <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
+                                                {item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )
+            ))}
+            <div className="h-12"></div>
+        </div>
+    );
+}
+"""
+
+# --- 3. APP (SEM OTIMIZAÇÃO AUTOMÁTICA) ---
+APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
   Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw
@@ -12,7 +353,7 @@ import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
 const DB_KEY = 'mp_db_v65_manual_control';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__API_KEY__";
 
 // --- HELPERS ---
 const safeStr = (val) => {
@@ -462,3 +803,40 @@ export default function App() {
       </div>
   );
 }
+"""
+
+FILES_TO_WRITE = {
+    "src/components/MapView.jsx": CODE_MAP_VIEW,
+    "src/components/RouteList.jsx": CODE_ROUTE_LIST,
+    "src/App.jsx": APP_JSX_CONTENT.replace("__API_KEY__", API_KEY_VALUE)
+}
+
+def write_files():
+    for path, content in FILES_TO_WRITE.items():
+        dir_name = os.path.dirname(path)
+        if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"Escrevendo {path}")
+
+def main():
+    print(f"--- Iniciando V27 (Manual Control) {TIMESTAMP} ---")
+    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
+    os.makedirs(CURRENT_BACKUP_PATH)
+    
+    if os.path.exists("src/App.jsx"): shutil.copy2("src/App.jsx", CURRENT_BACKUP_PATH)
+
+    write_files()
+
+    print("--- Git Push ---")
+    subprocess.run("git add .", shell=True)
+    subprocess.run(f'git commit -m "Update V27: Manual Mode + Map Actions - {TIMESTAMP}"', shell=True)
+    subprocess.run("git push", shell=True)
+    
+    os.remove(__file__)
+    print("Concluído.")
+
+if __name__ == "__main__":
+    main()
+
+
