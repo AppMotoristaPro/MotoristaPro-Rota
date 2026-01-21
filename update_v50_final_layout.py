@@ -1,4 +1,84 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import os
+import shutil
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# 1. CSS (Layout Limpo + Botão Fixo Inferior)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F1F5F9; /* Cinza de fundo mais profissional */
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Container do Mapa */
+.map-container { width: 100%; height: 100%; }
+
+/* Card Estilo Clássico (Limpo) */
+.route-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  border: 1px solid #E2E8F0;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+.route-card:active { transform: scale(0.99); background-color: #F8FAFC; }
+
+/* Status Lateral */
+.status-bar-pending { border-left: 5px solid #3B82F6; }
+.status-bar-success { border-left: 5px solid #10B981; background-color: #F0FDF4; }
+.status-bar-failed { border-left: 5px solid #EF4444; background-color: #FEF2F2; }
+.status-bar-partial { border-left: 5px solid #F59E0B; background-color: #FFFBEB; }
+
+/* Botão Fixo Inferior (Floating Action) */
+.bottom-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  z-index: 50;
+  display: flex;
+  gap: 10px;
+}
+
+.btn-primary {
+  background: #2563EB;
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+.btn-secondary {
+  background: #F8FAFC;
+  color: #475569;
+  border: 1px solid #E2E8F0;
+  font-weight: 600;
+}
+
+/* Toast */
+.toast-anim { animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+@keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+'''
+
+# 2. APP.JSX (Lógica V50)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -11,7 +91,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v50_classic';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS ---
 const safeStr = (val) => {
@@ -527,3 +607,28 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V50 (LAYOUT CLÁSSICO) - {APP_NAME}")
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando arquivos...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+        
+    with open("src/index.css", 'w', encoding='utf-8') as f:
+        f.write(files_content['src/index.css'])
+
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V50 Classic Layout Restored, Fixed Action Bar & Import Toast"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
