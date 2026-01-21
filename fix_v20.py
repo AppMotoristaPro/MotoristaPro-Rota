@@ -1,4 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import datetime
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+BACKUP_DIR = "backup"
+TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v20_{TIMESTAMP}")
+
+# CHAVE API
+API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+# --- CONTEÚDO DO APP.JSX ---
+APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, Sliders, MapPin, 
   Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Check, RotateCcw
@@ -12,7 +26,7 @@ import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
 const DB_KEY = 'mp_db_v58_pure_google';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__API_KEY__";
 
 // --- HELPERS ---
 const safeStr = (val) => {
@@ -596,3 +610,38 @@ export default function App() {
       </div>
   );
 }
+"""
+
+FILES_TO_WRITE = {
+    "src/App.jsx": APP_JSX_CONTENT.replace("__API_KEY__", API_KEY_VALUE)
+}
+
+def write_files():
+    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
+    os.makedirs(CURRENT_BACKUP_PATH)
+    
+    if os.path.exists("src/App.jsx"): shutil.copy2("src/App.jsx", CURRENT_BACKUP_PATH)
+
+    for path, content in FILES_TO_WRITE.items():
+        dir_name = os.path.dirname(path)
+        if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"Escrevendo {path}")
+
+def main():
+    print(f"--- Iniciando V20 (100% Google Step-by-Step) {TIMESTAMP} ---")
+    write_files()
+    
+    print("--- Git Push ---")
+    subprocess.run("git add .", shell=True)
+    subprocess.run(f'git commit -m "Update V20: Otimização Pure Google Step-by-Step - {TIMESTAMP}"', shell=True)
+    subprocess.run("git push", shell=True)
+    
+    os.remove(__file__)
+    print("Concluído.")
+
+if __name__ == "__main__":
+    main()
+
+
