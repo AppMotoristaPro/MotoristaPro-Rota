@@ -1,25 +1,19 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
-  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
+  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Compass
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v43_clusters';
+const DB_KEY = 'mp_db_v45_nav_pro';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
-// --- HELPERS ---
-const safeStr = (val) => {
-    if (val === null || val === undefined) return '';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return String(val).trim();
-};
-
-const getMarkerIcon = (status, isCurrent, labelText) => {
+// --- HELPERS VISUAIS ---
+const getMarkerIcon = (status, isCurrent) => {
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; 
     if (status === 'success') fillColor = "#10B981";
@@ -33,20 +27,40 @@ const getMarkerIcon = (status, isCurrent, labelText) => {
         fillOpacity: 1,
         strokeWeight: 1.5,
         strokeColor: "#FFFFFF",
-        scale: isCurrent ? 2.2 : 1.8, 
+        scale: isCurrent ? 2.0 : 1.4,
         anchor: { x: 12, y: 22 },
         labelOrigin: { x: 12, y: 10 }
     };
 };
 
+// Ícone do Carro/Usuário (Seta de Navegação)
+const getUserIcon = (heading) => {
+    return {
+        path: "M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z", // Seta
+        fillColor: "#4285F4",
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: "#FFFFFF",
+        rotation: heading || 0,
+        scale: 1.5,
+        anchor: { x: 12, y: 12 }
+    };
+};
+
 const mapContainerStyle = { width: '100%', height: '100%' };
-const mapOptions = { disableDefaultUI: true, zoomControl: false, clickableIcons: false };
+
+// --- HELPERS DE DADOS ---
+const safeStr = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val).trim();
+};
 
 const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
     const groups = {};
     stops.forEach(stop => {
-        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
+        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
         const key = rawName.trim().toLowerCase();
         if (!groups[key]) {
             groups[key] = {
@@ -57,6 +71,7 @@ const groupStopsByStopName = (stops) => {
         }
         groups[key].items.push(stop);
     });
+    
     const ordered = [];
     const seen = new Set();
     stops.forEach(stop => {
@@ -77,88 +92,61 @@ const groupStopsByStopName = (stops) => {
     return ordered;
 };
 
-// --- ALGORITMO DE CLUSTERING (K-MEANS SIMPLIFICADO) ---
-const clusterStops = (stops, maxPerCluster) => {
-    if (stops.length <= maxPerCluster) return [stops];
-
-    const numClusters = Math.ceil(stops.length / maxPerCluster);
-    let centroids = [];
-    
-    // Inicializa centróides espalhados
-    for (let i = 0; i < numClusters; i++) {
-        centroids.push(stops[Math.floor(i * stops.length / numClusters)]);
-    }
-
-    let clusters = Array.from({ length: numClusters }, () => []);
-    
-    // Atribui cada ponto ao centróide mais próximo
-    stops.forEach(stop => {
-        let minDist = Infinity;
-        let clusterIdx = 0;
-        centroids.forEach((c, idx) => {
-            const d = Math.pow(stop.lat - c.lat, 2) + Math.pow(stop.lng - c.lng, 2);
-            if (d < minDist) { minDist = d; clusterIdx = idx; }
-        });
-        clusters[clusterIdx].push(stop);
-    });
-
-    // Rebalanceamento simples (se algum cluster ficou vazio ou muito cheio, redistribui linearmente como fallback)
-    // Para simplificar e garantir robustez, se o K-Means falhar em equilibrar, usamos chunking geográfico simples
-    const flatCheck = clusters.some(c => c.length > 25 || c.length === 0);
-    if (flatCheck) {
-        // Fallback: Ordena por latitude e fatia
-        const sorted = [...stops].sort((a, b) => a.lat - b.lat);
-        clusters = [];
-        for (let i = 0; i < sorted.length; i += maxPerCluster) {
-            clusters.push(sorted.slice(i, i + maxPerCluster));
-        }
-    }
-
-    return clusters;
-};
-
-// --- GOOGLE BATCH OPTIMIZER ---
-// Função assíncrona que processa clusters em sequência
-const optimizeClustersSequentially = async (clusters, startPos) => {
+// --- ALGORITMO DE OTIMIZAÇÃO V45 (ROLLING CHAIN) ---
+const optimizeRollingChain = async (allStops, startPos) => {
+    let unvisited = [...allStops];
     let finalRoute = [];
-    let currentStart = startPos;
+    let currentPos = startPos;
     const service = new window.google.maps.DirectionsService();
 
-    for (const cluster of clusters) {
-        if (cluster.length === 0) continue;
-
-        const waypoints = cluster.map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
-        
-        // Promessa para esperar o Google responder cada lote
-        const result = await new Promise((resolve) => {
-            service.route({
-                origin: currentStart,
-                destination: cluster[0], // Destino provisório (será reordenado)
-                waypoints: waypoints,
-                optimizeWaypoints: true,
-                travelMode: 'DRIVING'
-            }, (res, status) => {
-                if (status === 'OK') resolve(res);
-                else resolve(null);
-            });
+    // Loop enquanto houver paradas
+    while (unvisited.length > 0) {
+        // 1. Encontra os 23 pontos mais próximos do ponto atual (Cluster Dinâmico)
+        // Usamos 23 para deixar margem para origem e destino na API (Max 25)
+        unvisited.sort((a, b) => {
+            const dA = Math.pow(a.lat - currentPos.lat, 2) + Math.pow(a.lng - currentPos.lng, 2);
+            const dB = Math.pow(b.lat - currentPos.lat, 2) + Math.pow(b.lng - currentPos.lng, 2);
+            return dA - dB;
         });
 
-        if (result) {
-            const order = result.routes[0].waypoint_order;
-            const orderedCluster = order.map(idx => cluster[idx]);
-            finalRoute = [...finalRoute, ...orderedCluster];
-            // O último ponto deste cluster vira o início do próximo
-            currentStart = orderedCluster[orderedCluster.length - 1];
-        } else {
-            // Se falhar, adiciona como estava (fallback)
-            finalRoute = [...finalRoute, ...cluster];
-            currentStart = cluster[cluster.length - 1];
-        }
+        const batch = unvisited.slice(0, 23);
+        unvisited = unvisited.slice(23); // Remove os escolhidos da lista global
+
+        // 2. Manda o Google Otimizar esse lote
+        const waypoints = batch.map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
         
-        // Pequeno delay para não estourar rate limit (opcional, mas bom pra segurança)
-        await new Promise(r => setTimeout(r, 300));
+        try {
+            const result = await new Promise((resolve, reject) => {
+                service.route({
+                    origin: currentPos,
+                    destination: batch[batch.length - 1], // Destino provisório, Google vai reordenar
+                    waypoints: waypoints,
+                    optimizeWaypoints: true,
+                    travelMode: 'DRIVING'
+                }, (res, status) => {
+                    if (status === 'OK') resolve(res);
+                    else reject(status);
+                });
+            });
+
+            const order = result.routes[0].waypoint_order;
+            const orderedBatch = order.map(idx => batch[idx]);
+            
+            finalRoute.push(...orderedBatch);
+            
+            // O último ponto deste lote vira o início do próximo
+            currentPos = orderedBatch[orderedBatch.length - 1];
+            
+            // Pequeno delay para evitar rate limit
+            await new Promise(r => setTimeout(r, 400));
+
+        } catch (e) {
+            console.warn("Falha Google Batch, usando ordem local:", e);
+            finalRoute.push(...batch);
+            currentPos = batch[batch.length - 1];
+        }
     }
-    
+
     return finalRoute;
 };
 
@@ -168,7 +156,12 @@ export default function App() {
   const [view, setView] = useState('home'); 
   const [newRouteName, setNewRouteName] = useState('');
   const [tempStops, setTempStops] = useState([]);
+  
+  // Estados de Navegação
   const [userPos, setUserPos] = useState(null);
+  const [userHeading, setUserHeading] = useState(0); // Bússola
+  const [isNavigating, setIsNavigating] = useState(false); // Modo Follow Me
+  
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [toast, setToast] = useState(null);
@@ -178,34 +171,45 @@ export default function App() {
   const [customStartAddr, setCustomStartAddr] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [selectedMarker, setSelectedMarker] = useState(null);
-  const [directions, setDirections] = useState(null);
 
-  const { isLoaded } = useJsApiLoader({ id: 'gmaps', googleMapsApiKey: GOOGLE_KEY });
-  const [mapInstance, setMapInstance] = useState(null);
+  // Estados Google Maps API
+  const [directionsResponse, setDirectionsResponse] = useState(null);
+  const mapRef = useRef(null);
+
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: GOOGLE_KEY
+  });
 
   useEffect(() => {
     try {
         const saved = localStorage.getItem(DB_KEY);
         if (saved) setRoutes(JSON.parse(saved));
     } catch (e) { localStorage.removeItem(DB_KEY); }
-    getCurrentLocation(false);
+    startGps();
   }, []);
 
   useEffect(() => { localStorage.setItem(DB_KEY, JSON.stringify(routes)); }, [routes]);
 
   const showToast = (msg, type = 'success') => {
       setToast({ msg, type });
-      setTimeout(() => setToast(null), 2500);
+      setTimeout(() => setToast(null), 2000);
   };
 
-  const getCurrentLocation = async (force = false) => {
+  const startGps = async () => {
       try {
-          if (force) await Geolocation.requestPermissions();
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
-          const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setUserPos(newPos);
-          return newPos;
-      } catch (e) { return null; }
+          await Geolocation.requestPermissions();
+          // Watch Position para pegar movimento e direção
+          Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 5000 }, (pos) => {
+              if (pos) {
+                  setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                  // Pega a direção (heading) se disponível (GPS em movimento)
+                  if (pos.coords.heading !== null && !isNaN(pos.coords.heading)) {
+                      setUserHeading(pos.coords.heading);
+                  }
+              }
+          });
+      } catch (e) { console.error(e); }
   };
 
   const handleFileUpload = (e) => {
@@ -226,11 +230,11 @@ export default function App() {
         const norm = data.map((r, i) => {
             const k = {};
             Object.keys(r).forEach(key => k[String(key).trim().toLowerCase()] = r[key]);
-            const safeString = (val) => val ? String(val) : '';
+            
             return {
                 id: Date.now() + i + Math.random(),
-                name: safeString(k['stop'] || k['parada'] || k['cliente'] || `Parada ${i+1}`),
-                stopName: safeString(k['stop'] || k['parada'] || `Parada ${i+1}`), 
+                name: safeStr(k['stop'] || k['parada'] || k['cliente'] || `Parada ${i+1}`),
+                stopName: safeStr(k['stop'] || k['parada'] || `Parada ${i+1}`), 
                 recipient: safeStr(k['recebedor'] || k['contato'] || 'Recebedor'),
                 address: safeStr(k['destination address'] || k['endereço'] || '---'),
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
@@ -245,7 +249,7 @@ export default function App() {
   };
 
   const createRoute = () => {
-      if(!newRouteName.trim() || tempStops.length === 0) return;
+      if(!newRouteName.trim() || !tempStops.length) return;
       setRoutes([{ id: Date.now(), name: newRouteName, date: new Date().toLocaleDateString(), stops: tempStops, optimized: false }, ...routes]);
       setNewRouteName(''); setTempStops([]); setView('home');
   };
@@ -257,7 +261,9 @@ export default function App() {
       }
   };
 
-  // --- ENGINE DE OTIMIZAÇÃO INTELIGENTE (V43) ---
+  const handleOptimizeClick = () => setShowStartModal(true);
+
+  // --- LOGICA V45: OTIMIZAÇÃO EM CADEIA ---
   const runSmartOptimization = async (startPos) => {
       setIsOptimizing(true);
       setShowStartModal(false);
@@ -269,43 +275,32 @@ export default function App() {
       const pending = currentRoute.stops.filter(s => s.status === 'pending');
       const done = currentRoute.stops.filter(s => s.status !== 'pending');
       
-      // 1. Agrupar logicamente (para não separar pacotes do mesmo prédio)
-      const locationMap = new Map();
-      pending.forEach(s => {
-          const key = `${s.lat.toFixed(5)},${s.lng.toFixed(5)}`;
-          if(!locationMap.has(key)) locationMap.set(key, []);
-          locationMap.get(key).push(s);
-      });
-
-      // Lista de locais únicos para otimizar
-      let uniqueLocations = Array.from(locationMap.values()).map(items => ({
-          lat: items[0].lat, 
-          lng: items[0].lng, 
-          items: items // Guardamos os itens dentro do "nó" de localização
-      }));
-
-      // 2. Clustering e Otimização em Lotes
-      // Divide em grupos de 23 (margem para start/end) para caber na API do Google
-      const clusters = clusterStops(uniqueLocations, 23);
-      
       try {
-          // Otimiza cada cluster sequencialmente usando o Google
-          const optimizedNodes = await optimizeClustersSequentially(clusters, startPos);
-          
-          // 3. Descompactar (Transformar nós de volta em lista plana)
-          const finalStops = [];
-          optimizedNodes.forEach(node => {
-              finalStops.push(...node.items);
+          // Agrupar logicamente por local antes de otimizar
+          const locationMap = new Map();
+          pending.forEach(s => {
+              const key = `${s.lat.toFixed(5)}_${s.lng.toFixed(5)}`;
+              if(!locationMap.has(key)) locationMap.set(key, []);
+              locationMap.get(key).push(s);
           });
+          
+          let uniqueLocations = Array.from(locationMap.values()).map(items => ({
+              lat: items[0].lat, lng: items[0].lng, items: items
+          }));
+
+          // RODA O ALGORITMO ROLLING CHAIN
+          const optimizedNodes = await optimizeRollingChain(uniqueLocations, startPos);
+          
+          const finalStops = [];
+          optimizedNodes.forEach(node => finalStops.push(...node.items));
 
           const updatedRoutes = [...routes];
           updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...finalStops], optimized: true };
           setRoutes(updatedRoutes);
           showToast("Rota Otimizada com Sucesso!");
       } catch (err) {
-          alert("Erro na otimização: " + err.message);
+          alert("Erro otimização: " + err.message);
       }
-      
       setIsOptimizing(false);
   };
 
@@ -313,7 +308,7 @@ export default function App() {
       let pos = userPos;
       if (!pos) pos = await getCurrentLocation(true);
       if (pos) runSmartOptimization(pos);
-      else alert("Ative o GPS.");
+      else alert("GPS indisponível.");
   };
 
   const confirmAddressStart = async () => {
@@ -327,10 +322,9 @@ export default function App() {
               const loc = data.results[0].geometry.location;
               runSmartOptimization({ lat: loc.lat, lng: loc.lng });
           } else { alert("Endereço não encontrado."); }
-      } catch(e) { setIsGeocoding(false); alert("Erro de conexão."); }
+      } catch(e) { setIsGeocoding(false); alert("Erro conexão."); }
   };
 
-  // ... (RESTO DAS FUNÇÕES UI MANTIDAS IGUAIS À V36/V42) ...
   const setStatus = (stopId, status) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
@@ -344,36 +338,52 @@ export default function App() {
       }
   };
 
-  const openNav = (lat, lng) => {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
-  };
-
   const toggleGroup = (id) => setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
-  const metrics = useMemo(() => {
-    if (!activeRoute || !activeRoute.stops.length) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-    const pending = activeRoute.stops.filter(s => s.status === 'pending');
-    let km = 0;
-    // ... Calculo metricas simples ...
-    return { km: (pending.length * 1.5).toFixed(1), time: "Calc...", remainingPackages: pending.length };
-  }, [activeRoute]);
-
+  
   const filteredGroups = useMemo(() => {
       if (!searchQuery) return groupedStops;
-      return groupedStops.filter(g => g.mainName.toLowerCase().includes(searchQuery.toLowerCase()));
+      const lower = searchQuery.toLowerCase();
+      return groupedStops.filter(g => 
+          safeStr(g.mainName).toLowerCase().includes(lower) || 
+          safeStr(g.mainAddress).toLowerCase().includes(lower)
+      );
   }, [groupedStops, searchQuery]);
 
+  // --- INTEGRAÇÃO GOOGLE DIRECTIONS E CAMERA ---
+  
+  // 1. Calcular Rota Azul (Linha na Rua)
   useEffect(() => {
-      if (showMap && isLoaded && mapInstance && nextGroup) {
-          mapInstance.panTo({ lat: nextGroup.lat, lng: nextGroup.lng });
-          mapInstance.setZoom(16);
+      if (isLoaded && nextGroup && userPos) {
+          const service = new window.google.maps.DirectionsService();
+          service.route({
+              origin: userPos,
+              destination: { lat: nextGroup.lat, lng: nextGroup.lng },
+              travelMode: 'DRIVING'
+          }, (res, status) => {
+              if (status === 'OK') setDirectionsResponse(res);
+          });
+      } else {
+          setDirectionsResponse(null);
       }
-  }, [nextGroup, showMap, isLoaded, mapInstance]);
+  }, [nextGroup?.id, userPos?.lat, userPos?.lng, isLoaded]);
 
-  // RENDERIZAÇÃO DA UI (Idêntica à versão estável anterior)
+  // 2. Follow Me + Head Up (Seguir GPS e Girar Mapa)
+  useEffect(() => {
+      if (isLoaded && mapRef.current && userPos && isNavigating) {
+          const map = mapRef.current;
+          
+          map.panTo(userPos); // Centraliza no carro
+          map.setZoom(18); // Zoom de navegação
+          map.setHeading(userHeading); // Gira o mapa conforme a bússola
+          map.setTilt(45); // Inclina para 3D
+      }
+  }, [userPos, userHeading, isNavigating, isLoaded]);
+
+  // VIEWS
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
           <div className="flex justify-between items-center mb-8">
@@ -402,8 +412,8 @@ export default function App() {
           <button onClick={() => setView('home')} className="self-start mb-6"><ArrowLeft/></button>
           <h2 className="text-2xl font-bold mb-8">Nova Rota</h2>
           <div className="space-y-6 flex-1">
-              <input type="text" className="w-full p-4 bg-slate-50 rounded-xl" placeholder="Nome" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/>
-              <label className="block w-full h-40 border-2 border-dashed rounded-xl flex items-center justify-center bg-slate-50">
+              <input type="text" className="w-full p-4 bg-slate-50 rounded-xl" placeholder="Nome da Rota" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/>
+              <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl bg-slate-50">
                   <Upload className="mb-2 text-slate-400"/> <span className="text-sm font-bold text-slate-500">Importar Planilha</span>
                   <input type="file" onChange={handleFileUpload} className="hidden" accept=".csv,.xlsx"/>
               </label>
@@ -415,15 +425,15 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
-          {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
+          {toast && <div className="fixed top-4 left-4 right-4 p-4 bg-green-600 text-white text-center font-bold rounded-xl shadow-2xl z-50 toast-anim">{toast.msg}</div>}
           
           {showStartModal && (
               <div className="absolute inset-0 bg-black/60 z-[3000] flex items-center justify-center p-4">
                   <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
-                      <h3 className="text-xl font-bold">Otimizar Rota</h3>
-                      <p className="text-xs text-slate-500">O Google calculará a melhor rota em lotes inteligentes.</p>
+                      <h3 className="text-xl font-bold">Otimizar</h3>
                       <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><span className="font-bold">Usar GPS Atual</span></button>
                       <div className="flex gap-2"><input type="text" className="flex-1 p-3 bg-slate-50 rounded-xl border text-sm" placeholder="Ou digite endereço..." value={customStartAddr} onChange={e => setCustomStartAddr(e.target.value)}/><button onClick={confirmAddressStart} disabled={isGeocoding} className="bg-slate-900 text-white p-3 rounded-xl">{isGeocoding ? <Loader2 className="animate-spin"/> : <Check/>}</button></div>
+                      <button onClick={() => setShowStartModal(false)} className="w-full text-slate-400 font-bold">Cancelar</button>
                   </div>
               </div>
           )}
@@ -433,18 +443,18 @@ export default function App() {
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
                   <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
                   <div className="flex gap-2">
-                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
+                      <button onClick={() => { setShowMap(!showMap); setIsNavigating(false); }} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
                       <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
                   </div>
               </div>
               
-              {!showMap && (
+              {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={() => setShowStartModal(true)} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-gradient-green shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
+                          <button onClick={() => { setShowMap(true); setIsNavigating(true); }} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-gradient-green shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
                               <Navigation size={18}/> Navegar
                           </button>
                       )}
@@ -458,10 +468,12 @@ export default function App() {
                       <GoogleMap
                           mapContainerStyle={mapContainerStyle}
                           center={userPos || { lat: -23.55, lng: -46.63 }}
-                          zoom={14}
-                          options={mapOptions}
-                          onLoad={setMapInstance}
+                          zoom={16}
+                          options={{ ...mapOptions, heading: userHeading, tilt: isNavigating ? 45 : 0 }}
+                          onLoad={(map) => { setMapInstance(map); mapRef.current = map; }}
                       >
+                          {directionsResponse && <DirectionsRenderer directions={directionsResponse} options={{ suppressMarkers: true, polylineOptions: { strokeColor: "#2563EB", strokeWeight: 5 } }} />}
+                          
                           {groupedStops.map((g, idx) => (
                               <MarkerF 
                                 key={g.id} 
@@ -471,19 +483,35 @@ export default function App() {
                                 onClick={() => setSelectedMarker(g)}
                               />
                           ))}
-                          {userPos && <MarkerF position={{ lat: userPos.lat, lng: userPos.lng }} icon={getMarkerIcon('current', true)} />}
+                          
+                          {/* Marcador do Usuário (Carro) */}
+                          {userPos && <MarkerF position={{ lat: userPos.lat, lng: userPos.lng }} icon={getUserIcon(userHeading)} zIndex={2000} />}
 
                           {selectedMarker && (
                             <InfoWindowF position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} onCloseClick={() => setSelectedMarker(null)}>
                                 <div className="p-2 min-w-[200px]">
                                     <h3 className="font-bold text-sm mb-1">Parada: {safeStr(selectedMarker.mainName)}</h3>
                                     <p className="text-xs text-slate-500 mb-2">{safeStr(selectedMarker.mainAddress)}</p>
-                                    <button onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} className="w-full bg-blue-600 text-white py-2 rounded text-xs font-bold">NAVEGAR</button>
+                                    <button onClick={() => { setIsNavigating(true); setSelectedMarker(null); }} className="w-full bg-blue-600 text-white py-2 rounded text-xs font-bold">NAVEGAR AQUI</button>
                                 </div>
                             </InfoWindowF>
                           )}
                       </GoogleMap>
                   ) : <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin"/></div>}
+                  
+                  {nextGroup && (
+                      <div className="absolute bottom-6 left-4 right-4 bg-white p-4 rounded-xl shadow-xl z-[1000]">
+                          <div className="flex justify-between items-start">
+                              <div>
+                                  <h3 className="font-bold truncate">{nextGroup.mainName}</h3>
+                                  <p className="text-xs text-slate-500 mb-2">{nextGroup.mainAddress}</p>
+                              </div>
+                              <button onClick={() => setIsNavigating(!isNavigating)} className={`p-3 rounded-full ${isNavigating ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>
+                                  <Navigation size={20} className={isNavigating ? 'animate-pulse' : ''} />
+                              </button>
+                          </div>
+                      </div>
+                  )}
               </div>
           ) : (
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
@@ -511,8 +539,6 @@ export default function App() {
                           </div>
                       </div>
                   )}
-
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Lista</h4>
                   {filteredGroups.map((group, idx) => {
                       if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
                       const isExpanded = expandedGroups[group.id];
