@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Save
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx';
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v66_visual_reorder';
+const DB_KEY = 'mp_db_v65_manual_control';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
 // --- HELPERS ---
@@ -37,18 +37,18 @@ const groupStopsByStopName = (stops) => {
                 mainAddress: safeStr(stop.address),
                 items: [], 
                 status: 'pending',
-                // Tenta pegar o displayOrder se já estiver definido nos itens, senão 999
+                // Pega o menor número de parada (stopId) do grupo para usar no pino
                 displayOrder: stop.stopId || 999 
             };
         }
         groups[key].items.push(stop);
-        // Garante que o grupo pegue o menor stopId dos itens
+        // Atualiza displayOrder se encontrar um menor no grupo
         if (stop.stopId && stop.stopId < groups[key].displayOrder) {
             groups[key].displayOrder = stop.stopId;
         }
     });
     
-    // A ordem de exibição é baseada no array 'stops'
+    // A ordem na tela segue a ordem do array 'stops' (que está ordenada por importação/manual)
     const ordered = [];
     const seen = new Set();
     stops.forEach(stop => {
@@ -74,6 +74,7 @@ const groupStopsByStopName = (stops) => {
 const calculateTotalMetrics = (stops) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h", remaining: 0 };
     
+    // Cálculo simples em linha reta (fallback)
     let totalKm = 0;
     for (let i = 0; i < stops.length - 1; i++) {
         const p1 = stops[i];
@@ -116,10 +117,6 @@ export default function App() {
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
   const [realMetrics, setRealMetrics] = useState(null);
-
-  // ESTADOS DE REORDENAÇÃO VISUAL
-  const [isReordering, setIsReordering] = useState(false);
-  const [reorderList, setReorderList] = useState([]); // Array de groupIds na nova ordem
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
@@ -170,13 +167,15 @@ export default function App() {
             const name = safeStr(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || k['razao social'] || `Parada ${i+1}`);
             const address = safeStr(k['destination address'] || k['endereço'] || k['endereco'] || k['rua'] || '---');
             
+            // Tenta pegar o número da parada da planilha
+            // Aceita colunas: 'stop', 'seq', 'ordem', 'sequence'
             let stopId = parseInt(k['stop'] || k['seq'] || k['ordem'] || k['sequence'] || (i + 1));
             if (isNaN(stopId)) stopId = i + 1;
 
             return {
                 id: Date.now() + i + Math.random(),
                 name: name,
-                stopId: stopId,
+                stopId: stopId, // Salva o número original
                 recipient: safeStr(k['recebedor'] || k['contato'] || k['destinatario'] || 'Recebedor'),
                 address: address,
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
@@ -185,6 +184,7 @@ export default function App() {
             };
         }).filter(i => i.lat !== 0);
         
+        // Ordena inicialmente pela coluna STOP ID se ela existir na planilha
         norm.sort((a, b) => a.stopId - b.stopId);
 
         if (norm.length > 0) {
@@ -198,7 +198,8 @@ export default function App() {
 
   const createRoute = () => {
       if(!newRouteName.trim() || !tempStops.length) return;
-      setRoutes([{ id: Date.now(), name: newRouteName, date: new Date().toLocaleDateString(), stops: tempStops, optimized: false }, ...routes]);
+      // Define a rota inicial. Otimização=false pois é manual
+      setRoutes([{ id: Date.now(), name: newRouteName, date: new Date().toLocaleDateString(), stops: tempStops, optimized: true }, ...routes]);
       setNewRouteName(''); setTempStops([]); setImportSummary(null); setView('home');
   };
 
@@ -226,8 +227,10 @@ export default function App() {
   const updateAddress = async (stopId, newAddress) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
+      
       const updatedRoutes = [...routes];
       const stopIndex = updatedRoutes[rIdx].stops.findIndex(s => s.id === stopId);
+      
       if (stopIndex !== -1) {
           updatedRoutes[rIdx].stops[stopIndex].address = newAddress;
           setRoutes(updatedRoutes);
@@ -247,76 +250,32 @@ export default function App() {
       }
   };
 
-  // --- LÓGICA DE REORDENAÇÃO VISUAL (Item 2) ---
-  const startReorderMode = () => {
-      setIsReordering(true);
-      setShowMap(true);
-      setReorderList([]); // Limpa lista temporária
-      showToast("Toque nos pinos na ordem desejada!", "info");
-  };
-
-  const handleMapMarkerClick = (groupId) => {
-      if (!isReordering) return;
-      
-      // Se já clicou, não faz nada (ou poderia remover, mas vamos simplificar: só adiciona)
-      if (reorderList.includes(groupId)) return;
-
-      // Adiciona na lista temporária
-      setReorderList(prev => [...prev, groupId]);
-  };
-
-  const saveReorder = () => {
-      if (!isReordering) return;
+  const handleReorder = (oldGroupIndex, newGroupIndex) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
-
-      const currentStops = [...routes[rIdx].stops];
-      const groups = groupStopsByStopName(currentStops);
       
-      // Reconstrói a lista de paradas baseada na nova ordem dos grupos
+      const currentStops = [...routes[rIdx].stops];
+      const groups = groupStopsByStopName(currentStops); 
+      
+      if(newGroupIndex < 0 || newGroupIndex >= groups.length || oldGroupIndex < 0 || oldGroupIndex >= groups.length) return;
+
+      const movingGroup = groups[oldGroupIndex];
+      const remainingStops = currentStops.filter(s => !movingGroup.items.some(i => i.id === s.id));
+      const targetGroup = groups[newGroupIndex];
+      
       let newStopsList = [];
-      let nextStopId = 1;
+      if (newGroupIndex > oldGroupIndex) {
+           const targetLastIndex = remainingStops.reduce((last, curr, idx) => targetGroup.items.some(i => i.id === curr.id) ? idx : last, -1);
+           newStopsList = [...remainingStops.slice(0, targetLastIndex + 1), ...movingGroup.items, ...remainingStops.slice(targetLastIndex + 1)];
+      } else {
+           const targetFirstIndex = remainingStops.findIndex(s => targetGroup.items.some(i => i.id === s.id));
+           newStopsList = [...remainingStops.slice(0, targetFirstIndex), ...movingGroup.items, ...remainingStops.slice(targetFirstIndex)];
+      }
 
-      // 1. Adiciona os grupos que foram clicados (na ordem do clique)
-      reorderList.forEach(groupId => {
-          const group = groups.find(g => g.id === groupId);
-          if (group) {
-              // Atualiza o stopId de todos os itens do grupo
-              const updatedItems = group.items.map(item => ({
-                  ...item,
-                  stopId: nextStopId
-              }));
-              newStopsList.push(...updatedItems);
-              nextStopId++;
-          }
-      });
-
-      // 2. Adiciona os grupos que NÃO foram clicados (no final da fila)
-      groups.forEach(group => {
-          if (!reorderList.includes(group.id)) {
-              const updatedItems = group.items.map(item => ({
-                  ...item,
-                  stopId: nextStopId
-              }));
-              newStopsList.push(...updatedItems);
-              nextStopId++;
-          }
-      });
-
-      // Atualiza o estado
       const updatedRoutes = [...routes];
       updatedRoutes[rIdx].stops = newStopsList;
       setRoutes(updatedRoutes);
-      
-      setIsReordering(false);
-      setReorderList([]);
-      showToast("Nova sequência salva!");
-  };
-
-  const cancelReorder = () => {
-      setIsReordering(false);
-      setReorderList([]);
-      setShowMap(false); // Volta pra lista ou fica no mapa normal
+      showToast("Sequência Alterada!");
   };
 
   const setStatus = (stopId, status) => {
@@ -332,10 +291,6 @@ export default function App() {
       }
   };
 
-  const setAllStatus = (items, status) => {
-      items.forEach(item => setStatus(item.id, status));
-  };
-
   const openNav = (lat, lng) => {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
@@ -346,7 +301,12 @@ export default function App() {
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
-  // Renderização da linha azul do Google
+  const metrics = useMemo(() => {
+      if (!activeRoute) return { km: "0", time: "0h", remaining: 0 };
+      return calculateTotalMetrics(activeRoute.stops);
+  }, [activeRoute]);
+
+  // Renderização da linha azul do Google (Apenas visual, segue a ordem da lista)
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -400,6 +360,7 @@ export default function App() {
           <h2 className="text-2xl font-bold mb-8">Nova Rota</h2>
           <div className="space-y-6 flex-1">
               <input type="text" className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200" placeholder="Nome da Rota" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/>
+              
               {!importSummary ? (
                   <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl cursor-pointer">
                       <Upload className="mb-2 text-blue-500"/> 
@@ -425,25 +386,21 @@ export default function App() {
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
-          {/* BARRA SUPERIOR DE REORDENAÇÃO (Item 2) */}
-          {isReordering && (
-              <div className="absolute top-0 left-0 right-0 bg-yellow-400 p-3 z-50 flex items-center justify-between shadow-md">
-                  <span className="text-xs font-bold text-black uppercase">Modo Sequência: {reorderList.length} selecionados</span>
-                  <div className="flex gap-2">
-                      <button onClick={cancelReorder} className="bg-white/50 px-3 py-1 rounded text-xs font-bold">Cancelar</button>
-                      <button onClick={saveReorder} className="bg-black text-white px-3 py-1 rounded text-xs font-bold">SALVAR</button>
-                  </div>
-              </div>
-          )}
-
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
                   <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
+                  
                   <div className="flex gap-2">
-                      <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm"><RotateCcw size={20}/></button>
-                      <button onClick={deleteRoute} className="p-2 rounded-full bg-red-50 text-red-500 shadow-sm"><Trash2 size={20}/></button>
-                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
+                      <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm">
+                          <RotateCcw size={20}/>
+                      </button>
+                      <button onClick={deleteRoute} className="p-2 rounded-full bg-red-50 text-red-500 shadow-sm">
+                          <Trash2 size={20}/>
+                      </button>
+                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>
+                          {showMap ? <List size={20}/> : <MapIcon size={20}/>}
+                      </button>
                   </div>
               </div>
               
@@ -486,11 +443,7 @@ export default function App() {
                       nextGroup={nextGroup}
                       openNav={openNav}
                       isLoaded={isLoaded}
-                      setStatus={setStatus}
-                      setAllStatus={setAllStatus}
-                      isReordering={isReordering}
-                      reorderList={reorderList}
-                      onMarkerClick={handleMapMarkerClick}
+                      setStatus={setStatus} // Passa função para o mapa
                   />
               </div>
           ) : (
@@ -502,7 +455,7 @@ export default function App() {
                   expandedGroups={expandedGroups}
                   toggleGroup={toggleGroup}
                   setStatus={setStatus}
-                  onStartReorder={startReorderMode}
+                  onReorder={handleReorder}
                   onEditAddress={updateAddress}
               />
           )}

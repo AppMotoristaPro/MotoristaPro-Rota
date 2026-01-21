@@ -6,15 +6,15 @@ import subprocess
 # --- CONFIGURAÇÕES ---
 BACKUP_DIR = "backup"
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v27_{TIMESTAMP}")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v28_{TIMESTAMP}")
 
 # CHAVE API
 API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
-# --- 1. MAP VIEW (COM BOTÕES DE AÇÃO) ---
+# --- 1. MAP VIEW (COM LÓGICA DE REORDENAÇÃO VISUAL) ---
 CODE_MAP_VIEW = """import React, { useState } from 'react';
 import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
-import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle } from 'lucide-react';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, CheckSquare } from 'lucide-react';
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 const mapOptions = {
@@ -23,19 +23,37 @@ const mapOptions = {
     clickableIcons: false
 };
 
-const getMarkerIcon = (status, isCurrent) => {
-    let fillColor = "#3B82F6"; // Azul
-    if (status === 'success') fillColor = "#10B981"; // Verde
-    if (status === 'failed') fillColor = "#EF4444"; // Vermelho
-    if (isCurrent) fillColor = "#0F172A"; // Preto
+const getMarkerIcon = (status, isCurrent, isReordering, reorderIndex) => {
+    let fillColor = "#3B82F6"; // Azul Padrão
+    let scale = 1.6;
+    let strokeColor = "#FFFFFF";
+
+    if (isReordering) {
+        // Modo Reordenação
+        if (reorderIndex !== -1) {
+            fillColor = "#10B981"; // Verde (Já selecionado na nova ordem)
+            scale = 1.8;
+            strokeColor = "#000000";
+        } else {
+            fillColor = "#94A3B8"; // Cinza (Ainda não selecionado)
+        }
+    } else {
+        // Modo Normal
+        if (status === 'success') fillColor = "#10B981";
+        if (status === 'failed') fillColor = "#EF4444";
+        if (isCurrent) {
+            fillColor = "#0F172A"; // Preto (Atual)
+            scale = 2.2;
+        }
+    }
 
     return {
         path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
         fillColor: fillColor,
         fillOpacity: 1,
         strokeWeight: 2,
-        strokeColor: "#FFFFFF",
-        scale: isCurrent ? 2.2 : 1.6,
+        strokeColor: strokeColor,
+        scale: scale,
         anchor: { x: 12, y: 22 },
         labelOrigin: { x: 12, y: 10 }
     };
@@ -48,12 +66,24 @@ export default function MapView({
     nextGroup, 
     openNav,
     isLoaded,
-    setStatus // Recebe a função de status
+    setStatus,
+    setAllStatus, // Nova prop para entregar todos
+    isReordering, // Estado de reordenação
+    reorderList, // Lista temporária de IDs reordenados
+    onMarkerClick // Função de clique (muda comportamento se estiver reordenando)
 }) {
     const [selectedMarker, setSelectedMarker] = useState(null);
     const [mapInstance, setMapInstance] = useState(null);
 
     if (!isLoaded) return <div className="flex h-full items-center justify-center bg-slate-100"><Loader2 className="animate-spin text-slate-400"/></div>;
+
+    const handleMarkerClick = (group) => {
+        if (isReordering) {
+            onMarkerClick(group.id);
+        } else {
+            setSelectedMarker(group);
+        }
+    };
 
     return (
         <GoogleMap
@@ -63,7 +93,8 @@ export default function MapView({
             options={mapOptions}
             onLoad={setMapInstance}
         >
-            {directionsResponse && (
+            {/* Esconde a linha azul se estiver reordenando para limpar a visão */}
+            {!isReordering && directionsResponse && (
                 <DirectionsRenderer 
                     directions={directionsResponse} 
                     options={{ 
@@ -73,17 +104,35 @@ export default function MapView({
                 />
             )}
             
-            {groupedStops.map((g) => (
-                <MarkerF 
-                    key={g.id} 
-                    position={{ lat: g.lat, lng: g.lng }}
-                    // Usa o displayOrder (número da planilha) se existir, senão usa índice
-                    label={{ text: String(g.displayOrder), color: "white", fontSize: "11px", fontWeight: "bold" }}
-                    icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
-                    onClick={() => setSelectedMarker(g)}
-                    zIndex={nextGroup && g.id === nextGroup.id ? 1000 : 1}
-                />
-            ))}
+            {groupedStops.map((g) => {
+                // Lógica do Label (Número do Pino)
+                let labelText = String(g.displayOrder);
+                
+                if (isReordering) {
+                    const newIndex = reorderList.indexOf(g.id);
+                    if (newIndex !== -1) {
+                        labelText = String(newIndex + 1); // Novo número na sequência
+                    } else {
+                        labelText = "?"; // Pendente de clique
+                    }
+                }
+
+                return (
+                    <MarkerF 
+                        key={g.id} 
+                        position={{ lat: g.lat, lng: g.lng }}
+                        label={{ text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" }}
+                        icon={getMarkerIcon(
+                            g.status, 
+                            !isReordering && nextGroup && g.id === nextGroup.id,
+                            isReordering,
+                            isReordering ? reorderList.indexOf(g.id) : -1
+                        )}
+                        onClick={() => handleMarkerClick(g)}
+                        zIndex={10}
+                    />
+                )
+            })}
             
             {userPos && (
                 <MarkerF 
@@ -100,8 +149,8 @@ export default function MapView({
                 />
             )}
 
-            {/* JANELA DE INFORMAÇÃO TURBINADA */}
-            {selectedMarker && (
+            {/* JANELA DE INFORMAÇÃO (SÓ APARECE NO MODO NORMAL) */}
+            {selectedMarker && !isReordering && (
                 <InfoWindowF 
                     position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
                     onCloseClick={() => setSelectedMarker(null)}
@@ -110,14 +159,26 @@ export default function MapView({
                         <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
                             <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
                             <div>
-                                <h3 className="font-bold text-sm text-slate-800 leading-tight">Parada {selectedMarker.displayOrder}</h3>
-                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
+                                <h3 className="font-bold text-sm text-slate-800 leading-tight">Parada: {selectedMarker.displayOrder}</h3>
+                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.items.length} volumes</p>
                             </div>
                         </div>
                         
-                        {/* LISTA DE PACOTES DENTRO DA INFOWINDOW */}
+                        {/* BOTÃO ENTREGAR TODOS (Item 1) */}
+                        {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
+                            <button 
+                                onClick={() => {
+                                    setAllStatus(selectedMarker.items, 'success');
+                                    setSelectedMarker(null);
+                                }}
+                                className="w-full mb-2 bg-green-100 text-green-700 py-1.5 rounded border border-green-200 text-[10px] font-bold flex items-center justify-center gap-2"
+                            >
+                                <Layers size={12}/> ENTREGAR TODOS ({selectedMarker.items.filter(i => i.status === 'pending').length})
+                            </button>
+                        )}
+
                         <div className="max-h-[150px] overflow-y-auto mb-2 space-y-2">
-                            {selectedMarker.items.map((item, idx) => (
+                            {selectedMarker.items.map((item) => (
                                 <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
                                     <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
                                     
@@ -159,9 +220,9 @@ export default function MapView({
 }
 """
 
-# --- 2. ROUTE LIST (COM EDIÇÃO PREENCHIDA) ---
+# --- 2. ROUTE LIST (BOTÃO DE EDITAR CHAMA O MAPA) ---
 CODE_ROUTE_LIST = """import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save, Package, Pencil } from 'lucide-react';
+import { Check, ChevronUp, ChevronDown, Layers, Edit3, Package, Pencil, Map as MapIcon } from 'lucide-react';
 
 export default function RouteList(props) {
     const { 
@@ -172,12 +233,9 @@ export default function RouteList(props) {
         expandedGroups = {}, 
         toggleGroup, 
         setStatus,
-        onReorder,
+        onStartReorder, // Mudou: Agora inicia o modo mapa
         onEditAddress
     } = props;
-
-    const [isEditing, setIsEditing] = useState(false);
-    const [editValues, setEditValues] = useState({});
 
     const safeStr = (val) => val ? String(val).trim() : '';
 
@@ -187,10 +245,8 @@ export default function RouteList(props) {
         });
     };
 
-    // --- CORREÇÃO: Prompt com valor default ---
     const handleEditAddressClick = (e, item) => {
         e.stopPropagation();
-        // O segundo argumento do prompt preenche a caixa
         const newAddr = prompt("Editar Endereço:", item.address); 
         if (newAddr && newAddr.trim() !== "") {
             onEditAddress(item.id, newAddr);
@@ -202,39 +258,26 @@ export default function RouteList(props) {
         safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const handleInputChange = (groupId, value) => {
-        setEditValues(prev => ({...prev, [groupId]: value}));
-    };
-
-    const handleInputBlur = (group, oldIndex) => {
-        const newIndex = parseInt(editValues[group.id]);
-        if (!isNaN(newIndex) && newIndex > 0 && newIndex <= groupedStops.length) {
-            onReorder(oldIndex, newIndex - 1); 
-        }
-        setEditValues(prev => ({...prev, [group.id]: ''}));
-    };
-
     return (
         <div className="flex-1 overflow-y-auto px-4 pt-4 pb-safe space-y-3 relative bg-slate-50">
             
             {!searchQuery && (
                 <div className="flex justify-end mb-2">
+                    {/* Item 2: Botão de Editar agora chama o mapa */}
                     <button 
-                        onClick={() => setIsEditing(!isEditing)} 
-                        className={`text-[10px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 transition uppercase tracking-wider
-                        ${isEditing ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-500 border border-slate-200'}`}
+                        onClick={onStartReorder} 
+                        className="text-[10px] font-bold px-3 py-2 rounded-full flex items-center gap-2 transition uppercase tracking-wider bg-slate-900 text-white shadow-lg active:scale-95"
                     >
-                        {isEditing ? <Save size={12}/> : <Edit3 size={12}/>}
-                        {isEditing ? 'Salvar Ordem' : 'Editar Sequência'}
+                        <MapIcon size={12}/> Editar Sequência no Mapa
                     </button>
                 </div>
             )}
 
-            {!isEditing && !searchQuery && nextGroup && (
+            {!searchQuery && nextGroup && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
-                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima Parada</div>
+                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
                     <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
-                       #{nextGroup.displayOrder} - {safeStr(nextGroup.mainName)}
+                       Parada: {nextGroup.displayOrder}
                     </h3>
                     <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                     
@@ -271,40 +314,27 @@ export default function RouteList(props) {
             )}
 
             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2">
-                {isEditing ? 'Digite o número da parada' : 'Lista Sequencial'}
+                Lista de Entregas
             </h4>
             
-            {filteredGroups.map((group, idx) => (
-                (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
+            {filteredGroups.map((group) => (
+                (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
                     <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
-                        <div onClick={() => !isEditing && toggleGroup && toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
-                            
-                            {isEditing ? (
-                                <input 
-                                    type="number" 
-                                    className="w-12 h-10 bg-slate-100 rounded-lg text-center font-bold text-base outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all"
-                                    placeholder={group.displayOrder}
-                                    value={editValues[group.id] !== undefined ? editValues[group.id] : ''}
-                                    onChange={(e) => handleInputChange(group.id, e.target.value)}
-                                    onBlur={() => handleInputBlur(group, idx)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleInputBlur(group, idx)}
-                                    onClick={(e) => e.stopPropagation()}
-                                />
-                            ) : (
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                    {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
-                                </div>
-                            )}
+                        <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
+                            </div>
 
                             <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada {group.displayOrder}: {safeStr(group.mainName)}</h4>
-                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacote(s) • {safeStr(group.mainAddress)}</p>
+                                {/* Item 3: Titulo Parada: X */}
+                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada: {group.displayOrder}</h4>
+                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
                             </div>
                             
-                            {!isEditing && group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
+                            {group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
                         </div>
                         
-                        {(expandedGroups[group.id] || (isEditing === false && group.items.length > 1 && expandedGroups[group.id])) && (
+                        {(expandedGroups[group.id] || (group.items.length > 1 && expandedGroups[group.id])) && (
                             <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
                                 {group.items.map((item) => (
                                     <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
@@ -338,11 +368,11 @@ export default function RouteList(props) {
 }
 """
 
-# --- 3. APP (SEM OTIMIZAÇÃO AUTOMÁTICA) ---
+# --- 3. APP (LÓGICA DE REORDENAÇÃO) ---
 APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Save
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
@@ -352,7 +382,7 @@ import * as XLSX from 'xlsx';
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v65_manual_control';
+const DB_KEY = 'mp_db_v66_visual_reorder';
 const GOOGLE_KEY = "__API_KEY__";
 
 // --- HELPERS ---
@@ -378,18 +408,18 @@ const groupStopsByStopName = (stops) => {
                 mainAddress: safeStr(stop.address),
                 items: [], 
                 status: 'pending',
-                // Pega o menor número de parada (stopId) do grupo para usar no pino
+                // Tenta pegar o displayOrder se já estiver definido nos itens, senão 999
                 displayOrder: stop.stopId || 999 
             };
         }
         groups[key].items.push(stop);
-        // Atualiza displayOrder se encontrar um menor no grupo
+        // Garante que o grupo pegue o menor stopId dos itens
         if (stop.stopId && stop.stopId < groups[key].displayOrder) {
             groups[key].displayOrder = stop.stopId;
         }
     });
     
-    // A ordem na tela segue a ordem do array 'stops' (que está ordenada por importação/manual)
+    // A ordem de exibição é baseada no array 'stops'
     const ordered = [];
     const seen = new Set();
     stops.forEach(stop => {
@@ -415,7 +445,6 @@ const groupStopsByStopName = (stops) => {
 const calculateTotalMetrics = (stops) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h", remaining: 0 };
     
-    // Cálculo simples em linha reta (fallback)
     let totalKm = 0;
     for (let i = 0; i < stops.length - 1; i++) {
         const p1 = stops[i];
@@ -458,6 +487,10 @@ export default function App() {
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
   const [realMetrics, setRealMetrics] = useState(null);
+
+  // ESTADOS DE REORDENAÇÃO VISUAL
+  const [isReordering, setIsReordering] = useState(false);
+  const [reorderList, setReorderList] = useState([]); // Array de groupIds na nova ordem
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
@@ -508,15 +541,13 @@ export default function App() {
             const name = safeStr(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || k['razao social'] || `Parada ${i+1}`);
             const address = safeStr(k['destination address'] || k['endereço'] || k['endereco'] || k['rua'] || '---');
             
-            // Tenta pegar o número da parada da planilha
-            // Aceita colunas: 'stop', 'seq', 'ordem', 'sequence'
             let stopId = parseInt(k['stop'] || k['seq'] || k['ordem'] || k['sequence'] || (i + 1));
             if (isNaN(stopId)) stopId = i + 1;
 
             return {
                 id: Date.now() + i + Math.random(),
                 name: name,
-                stopId: stopId, // Salva o número original
+                stopId: stopId,
                 recipient: safeStr(k['recebedor'] || k['contato'] || k['destinatario'] || 'Recebedor'),
                 address: address,
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
@@ -525,7 +556,6 @@ export default function App() {
             };
         }).filter(i => i.lat !== 0);
         
-        // Ordena inicialmente pela coluna STOP ID se ela existir na planilha
         norm.sort((a, b) => a.stopId - b.stopId);
 
         if (norm.length > 0) {
@@ -539,8 +569,7 @@ export default function App() {
 
   const createRoute = () => {
       if(!newRouteName.trim() || !tempStops.length) return;
-      // Define a rota inicial. Otimização=false pois é manual
-      setRoutes([{ id: Date.now(), name: newRouteName, date: new Date().toLocaleDateString(), stops: tempStops, optimized: true }, ...routes]);
+      setRoutes([{ id: Date.now(), name: newRouteName, date: new Date().toLocaleDateString(), stops: tempStops, optimized: false }, ...routes]);
       setNewRouteName(''); setTempStops([]); setImportSummary(null); setView('home');
   };
 
@@ -568,10 +597,8 @@ export default function App() {
   const updateAddress = async (stopId, newAddress) => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
-      
       const updatedRoutes = [...routes];
       const stopIndex = updatedRoutes[rIdx].stops.findIndex(s => s.id === stopId);
-      
       if (stopIndex !== -1) {
           updatedRoutes[rIdx].stops[stopIndex].address = newAddress;
           setRoutes(updatedRoutes);
@@ -591,32 +618,76 @@ export default function App() {
       }
   };
 
-  const handleReorder = (oldGroupIndex, newGroupIndex) => {
+  // --- LÓGICA DE REORDENAÇÃO VISUAL (Item 2) ---
+  const startReorderMode = () => {
+      setIsReordering(true);
+      setShowMap(true);
+      setReorderList([]); // Limpa lista temporária
+      showToast("Toque nos pinos na ordem desejada!", "info");
+  };
+
+  const handleMapMarkerClick = (groupId) => {
+      if (!isReordering) return;
+      
+      // Se já clicou, não faz nada (ou poderia remover, mas vamos simplificar: só adiciona)
+      if (reorderList.includes(groupId)) return;
+
+      // Adiciona na lista temporária
+      setReorderList(prev => [...prev, groupId]);
+  };
+
+  const saveReorder = () => {
+      if (!isReordering) return;
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
-      
+
       const currentStops = [...routes[rIdx].stops];
-      const groups = groupStopsByStopName(currentStops); 
+      const groups = groupStopsByStopName(currentStops);
       
-      if(newGroupIndex < 0 || newGroupIndex >= groups.length || oldGroupIndex < 0 || oldGroupIndex >= groups.length) return;
-
-      const movingGroup = groups[oldGroupIndex];
-      const remainingStops = currentStops.filter(s => !movingGroup.items.some(i => i.id === s.id));
-      const targetGroup = groups[newGroupIndex];
-      
+      // Reconstrói a lista de paradas baseada na nova ordem dos grupos
       let newStopsList = [];
-      if (newGroupIndex > oldGroupIndex) {
-           const targetLastIndex = remainingStops.reduce((last, curr, idx) => targetGroup.items.some(i => i.id === curr.id) ? idx : last, -1);
-           newStopsList = [...remainingStops.slice(0, targetLastIndex + 1), ...movingGroup.items, ...remainingStops.slice(targetLastIndex + 1)];
-      } else {
-           const targetFirstIndex = remainingStops.findIndex(s => targetGroup.items.some(i => i.id === s.id));
-           newStopsList = [...remainingStops.slice(0, targetFirstIndex), ...movingGroup.items, ...remainingStops.slice(targetFirstIndex)];
-      }
+      let nextStopId = 1;
 
+      // 1. Adiciona os grupos que foram clicados (na ordem do clique)
+      reorderList.forEach(groupId => {
+          const group = groups.find(g => g.id === groupId);
+          if (group) {
+              // Atualiza o stopId de todos os itens do grupo
+              const updatedItems = group.items.map(item => ({
+                  ...item,
+                  stopId: nextStopId
+              }));
+              newStopsList.push(...updatedItems);
+              nextStopId++;
+          }
+      });
+
+      // 2. Adiciona os grupos que NÃO foram clicados (no final da fila)
+      groups.forEach(group => {
+          if (!reorderList.includes(group.id)) {
+              const updatedItems = group.items.map(item => ({
+                  ...item,
+                  stopId: nextStopId
+              }));
+              newStopsList.push(...updatedItems);
+              nextStopId++;
+          }
+      });
+
+      // Atualiza o estado
       const updatedRoutes = [...routes];
       updatedRoutes[rIdx].stops = newStopsList;
       setRoutes(updatedRoutes);
-      showToast("Sequência Alterada!");
+      
+      setIsReordering(false);
+      setReorderList([]);
+      showToast("Nova sequência salva!");
+  };
+
+  const cancelReorder = () => {
+      setIsReordering(false);
+      setReorderList([]);
+      setShowMap(false); // Volta pra lista ou fica no mapa normal
   };
 
   const setStatus = (stopId, status) => {
@@ -632,6 +703,10 @@ export default function App() {
       }
   };
 
+  const setAllStatus = (items, status) => {
+      items.forEach(item => setStatus(item.id, status));
+  };
+
   const openNav = (lat, lng) => {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
@@ -642,12 +717,7 @@ export default function App() {
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
-  const metrics = useMemo(() => {
-      if (!activeRoute) return { km: "0", time: "0h", remaining: 0 };
-      return calculateTotalMetrics(activeRoute.stops);
-  }, [activeRoute]);
-
-  // Renderização da linha azul do Google (Apenas visual, segue a ordem da lista)
+  // Renderização da linha azul do Google
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -701,7 +771,6 @@ export default function App() {
           <h2 className="text-2xl font-bold mb-8">Nova Rota</h2>
           <div className="space-y-6 flex-1">
               <input type="text" className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200" placeholder="Nome da Rota" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/>
-              
               {!importSummary ? (
                   <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl cursor-pointer">
                       <Upload className="mb-2 text-blue-500"/> 
@@ -727,21 +796,25 @@ export default function App() {
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
+          {/* BARRA SUPERIOR DE REORDENAÇÃO (Item 2) */}
+          {isReordering && (
+              <div className="absolute top-0 left-0 right-0 bg-yellow-400 p-3 z-50 flex items-center justify-between shadow-md">
+                  <span className="text-xs font-bold text-black uppercase">Modo Sequência: {reorderList.length} selecionados</span>
+                  <div className="flex gap-2">
+                      <button onClick={cancelReorder} className="bg-white/50 px-3 py-1 rounded text-xs font-bold">Cancelar</button>
+                      <button onClick={saveReorder} className="bg-black text-white px-3 py-1 rounded text-xs font-bold">SALVAR</button>
+                  </div>
+              </div>
+          )}
+
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
                   <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
-                  
                   <div className="flex gap-2">
-                      <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm">
-                          <RotateCcw size={20}/>
-                      </button>
-                      <button onClick={deleteRoute} className="p-2 rounded-full bg-red-50 text-red-500 shadow-sm">
-                          <Trash2 size={20}/>
-                      </button>
-                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>
-                          {showMap ? <List size={20}/> : <MapIcon size={20}/>}
-                      </button>
+                      <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm"><RotateCcw size={20}/></button>
+                      <button onClick={deleteRoute} className="p-2 rounded-full bg-red-50 text-red-500 shadow-sm"><Trash2 size={20}/></button>
+                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
                   </div>
               </div>
               
@@ -784,7 +857,11 @@ export default function App() {
                       nextGroup={nextGroup}
                       openNav={openNav}
                       isLoaded={isLoaded}
-                      setStatus={setStatus} // Passa função para o mapa
+                      setStatus={setStatus}
+                      setAllStatus={setAllStatus}
+                      isReordering={isReordering}
+                      reorderList={reorderList}
+                      onMarkerClick={handleMapMarkerClick}
                   />
               </div>
           ) : (
@@ -796,7 +873,7 @@ export default function App() {
                   expandedGroups={expandedGroups}
                   toggleGroup={toggleGroup}
                   setStatus={setStatus}
-                  onReorder={handleReorder}
+                  onStartReorder={startReorderMode}
                   onEditAddress={updateAddress}
               />
           )}
@@ -820,7 +897,7 @@ def write_files():
         print(f"Escrevendo {path}")
 
 def main():
-    print(f"--- Iniciando V27 (Manual Control) {TIMESTAMP} ---")
+    print(f"--- Iniciando V28 (Reordenação Visual + Ações) {TIMESTAMP} ---")
     if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
     os.makedirs(CURRENT_BACKUP_PATH)
     
@@ -830,7 +907,7 @@ def main():
 
     print("--- Git Push ---")
     subprocess.run("git add .", shell=True)
-    subprocess.run(f'git commit -m "Update V27: Manual Mode + Map Actions - {TIMESTAMP}"', shell=True)
+    subprocess.run(f'git commit -m "Update V28: Visual Reordering - {TIMESTAMP}"', shell=True)
     subprocess.run("git push", shell=True)
     
     os.remove(__file__)

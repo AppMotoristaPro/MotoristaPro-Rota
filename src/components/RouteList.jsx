@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save, Package, Pencil } from 'lucide-react';
+import { Check, ChevronUp, ChevronDown, Layers, Edit3, Package, Pencil, Map as MapIcon } from 'lucide-react';
 
 export default function RouteList(props) {
     const { 
@@ -10,12 +10,9 @@ export default function RouteList(props) {
         expandedGroups = {}, 
         toggleGroup, 
         setStatus,
-        onReorder,
+        onStartReorder, // Mudou: Agora inicia o modo mapa
         onEditAddress
     } = props;
-
-    const [isEditing, setIsEditing] = useState(false);
-    const [editValues, setEditValues] = useState({});
 
     const safeStr = (val) => val ? String(val).trim() : '';
 
@@ -25,10 +22,8 @@ export default function RouteList(props) {
         });
     };
 
-    // --- CORREÇÃO: Prompt com valor default ---
     const handleEditAddressClick = (e, item) => {
         e.stopPropagation();
-        // O segundo argumento do prompt preenche a caixa
         const newAddr = prompt("Editar Endereço:", item.address); 
         if (newAddr && newAddr.trim() !== "") {
             onEditAddress(item.id, newAddr);
@@ -40,39 +35,26 @@ export default function RouteList(props) {
         safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const handleInputChange = (groupId, value) => {
-        setEditValues(prev => ({...prev, [groupId]: value}));
-    };
-
-    const handleInputBlur = (group, oldIndex) => {
-        const newIndex = parseInt(editValues[group.id]);
-        if (!isNaN(newIndex) && newIndex > 0 && newIndex <= groupedStops.length) {
-            onReorder(oldIndex, newIndex - 1); 
-        }
-        setEditValues(prev => ({...prev, [group.id]: ''}));
-    };
-
     return (
         <div className="flex-1 overflow-y-auto px-4 pt-4 pb-safe space-y-3 relative bg-slate-50">
             
             {!searchQuery && (
                 <div className="flex justify-end mb-2">
+                    {/* Item 2: Botão de Editar agora chama o mapa */}
                     <button 
-                        onClick={() => setIsEditing(!isEditing)} 
-                        className={`text-[10px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 transition uppercase tracking-wider
-                        ${isEditing ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-500 border border-slate-200'}`}
+                        onClick={onStartReorder} 
+                        className="text-[10px] font-bold px-3 py-2 rounded-full flex items-center gap-2 transition uppercase tracking-wider bg-slate-900 text-white shadow-lg active:scale-95"
                     >
-                        {isEditing ? <Save size={12}/> : <Edit3 size={12}/>}
-                        {isEditing ? 'Salvar Ordem' : 'Editar Sequência'}
+                        <MapIcon size={12}/> Editar Sequência no Mapa
                     </button>
                 </div>
             )}
 
-            {!isEditing && !searchQuery && nextGroup && (
+            {!searchQuery && nextGroup && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
-                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima Parada</div>
+                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
                     <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
-                       #{nextGroup.displayOrder} - {safeStr(nextGroup.mainName)}
+                       Parada: {nextGroup.displayOrder}
                     </h3>
                     <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                     
@@ -109,40 +91,27 @@ export default function RouteList(props) {
             )}
 
             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2">
-                {isEditing ? 'Digite o número da parada' : 'Lista Sequencial'}
+                Lista de Entregas
             </h4>
             
-            {filteredGroups.map((group, idx) => (
-                (!isEditing && !searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
+            {filteredGroups.map((group) => (
+                (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
                     <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
-                        <div onClick={() => !isEditing && toggleGroup && toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
-                            
-                            {isEditing ? (
-                                <input 
-                                    type="number" 
-                                    className="w-12 h-10 bg-slate-100 rounded-lg text-center font-bold text-base outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all"
-                                    placeholder={group.displayOrder}
-                                    value={editValues[group.id] !== undefined ? editValues[group.id] : ''}
-                                    onChange={(e) => handleInputChange(group.id, e.target.value)}
-                                    onBlur={() => handleInputBlur(group, idx)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleInputBlur(group, idx)}
-                                    onClick={(e) => e.stopPropagation()}
-                                />
-                            ) : (
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                    {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
-                                </div>
-                            )}
+                        <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
+                            </div>
 
                             <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada {group.displayOrder}: {safeStr(group.mainName)}</h4>
-                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacote(s) • {safeStr(group.mainAddress)}</p>
+                                {/* Item 3: Titulo Parada: X */}
+                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada: {group.displayOrder}</h4>
+                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
                             </div>
                             
-                            {!isEditing && group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
+                            {group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
                         </div>
                         
-                        {(expandedGroups[group.id] || (isEditing === false && group.items.length > 1 && expandedGroups[group.id])) && (
+                        {(expandedGroups[group.id] || (group.items.length > 1 && expandedGroups[group.id])) && (
                             <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
                                 {group.items.map((item) => (
                                     <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
-import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle } from 'lucide-react';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, CheckSquare } from 'lucide-react';
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 const mapOptions = {
@@ -9,19 +9,37 @@ const mapOptions = {
     clickableIcons: false
 };
 
-const getMarkerIcon = (status, isCurrent) => {
-    let fillColor = "#3B82F6"; // Azul
-    if (status === 'success') fillColor = "#10B981"; // Verde
-    if (status === 'failed') fillColor = "#EF4444"; // Vermelho
-    if (isCurrent) fillColor = "#0F172A"; // Preto
+const getMarkerIcon = (status, isCurrent, isReordering, reorderIndex) => {
+    let fillColor = "#3B82F6"; // Azul Padrão
+    let scale = 1.6;
+    let strokeColor = "#FFFFFF";
+
+    if (isReordering) {
+        // Modo Reordenação
+        if (reorderIndex !== -1) {
+            fillColor = "#10B981"; // Verde (Já selecionado na nova ordem)
+            scale = 1.8;
+            strokeColor = "#000000";
+        } else {
+            fillColor = "#94A3B8"; // Cinza (Ainda não selecionado)
+        }
+    } else {
+        // Modo Normal
+        if (status === 'success') fillColor = "#10B981";
+        if (status === 'failed') fillColor = "#EF4444";
+        if (isCurrent) {
+            fillColor = "#0F172A"; // Preto (Atual)
+            scale = 2.2;
+        }
+    }
 
     return {
         path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
         fillColor: fillColor,
         fillOpacity: 1,
         strokeWeight: 2,
-        strokeColor: "#FFFFFF",
-        scale: isCurrent ? 2.2 : 1.6,
+        strokeColor: strokeColor,
+        scale: scale,
         anchor: { x: 12, y: 22 },
         labelOrigin: { x: 12, y: 10 }
     };
@@ -34,12 +52,24 @@ export default function MapView({
     nextGroup, 
     openNav,
     isLoaded,
-    setStatus // Recebe a função de status
+    setStatus,
+    setAllStatus, // Nova prop para entregar todos
+    isReordering, // Estado de reordenação
+    reorderList, // Lista temporária de IDs reordenados
+    onMarkerClick // Função de clique (muda comportamento se estiver reordenando)
 }) {
     const [selectedMarker, setSelectedMarker] = useState(null);
     const [mapInstance, setMapInstance] = useState(null);
 
     if (!isLoaded) return <div className="flex h-full items-center justify-center bg-slate-100"><Loader2 className="animate-spin text-slate-400"/></div>;
+
+    const handleMarkerClick = (group) => {
+        if (isReordering) {
+            onMarkerClick(group.id);
+        } else {
+            setSelectedMarker(group);
+        }
+    };
 
     return (
         <GoogleMap
@@ -49,7 +79,8 @@ export default function MapView({
             options={mapOptions}
             onLoad={setMapInstance}
         >
-            {directionsResponse && (
+            {/* Esconde a linha azul se estiver reordenando para limpar a visão */}
+            {!isReordering && directionsResponse && (
                 <DirectionsRenderer 
                     directions={directionsResponse} 
                     options={{ 
@@ -59,17 +90,35 @@ export default function MapView({
                 />
             )}
             
-            {groupedStops.map((g) => (
-                <MarkerF 
-                    key={g.id} 
-                    position={{ lat: g.lat, lng: g.lng }}
-                    // Usa o displayOrder (número da planilha) se existir, senão usa índice
-                    label={{ text: String(g.displayOrder), color: "white", fontSize: "11px", fontWeight: "bold" }}
-                    icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
-                    onClick={() => setSelectedMarker(g)}
-                    zIndex={nextGroup && g.id === nextGroup.id ? 1000 : 1}
-                />
-            ))}
+            {groupedStops.map((g) => {
+                // Lógica do Label (Número do Pino)
+                let labelText = String(g.displayOrder);
+                
+                if (isReordering) {
+                    const newIndex = reorderList.indexOf(g.id);
+                    if (newIndex !== -1) {
+                        labelText = String(newIndex + 1); // Novo número na sequência
+                    } else {
+                        labelText = "?"; // Pendente de clique
+                    }
+                }
+
+                return (
+                    <MarkerF 
+                        key={g.id} 
+                        position={{ lat: g.lat, lng: g.lng }}
+                        label={{ text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" }}
+                        icon={getMarkerIcon(
+                            g.status, 
+                            !isReordering && nextGroup && g.id === nextGroup.id,
+                            isReordering,
+                            isReordering ? reorderList.indexOf(g.id) : -1
+                        )}
+                        onClick={() => handleMarkerClick(g)}
+                        zIndex={10}
+                    />
+                )
+            })}
             
             {userPos && (
                 <MarkerF 
@@ -86,8 +135,8 @@ export default function MapView({
                 />
             )}
 
-            {/* JANELA DE INFORMAÇÃO TURBINADA */}
-            {selectedMarker && (
+            {/* JANELA DE INFORMAÇÃO (SÓ APARECE NO MODO NORMAL) */}
+            {selectedMarker && !isReordering && (
                 <InfoWindowF 
                     position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
                     onCloseClick={() => setSelectedMarker(null)}
@@ -96,14 +145,26 @@ export default function MapView({
                         <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
                             <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
                             <div>
-                                <h3 className="font-bold text-sm text-slate-800 leading-tight">Parada {selectedMarker.displayOrder}</h3>
-                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
+                                <h3 className="font-bold text-sm text-slate-800 leading-tight">Parada: {selectedMarker.displayOrder}</h3>
+                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.items.length} volumes</p>
                             </div>
                         </div>
                         
-                        {/* LISTA DE PACOTES DENTRO DA INFOWINDOW */}
+                        {/* BOTÃO ENTREGAR TODOS (Item 1) */}
+                        {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
+                            <button 
+                                onClick={() => {
+                                    setAllStatus(selectedMarker.items, 'success');
+                                    setSelectedMarker(null);
+                                }}
+                                className="w-full mb-2 bg-green-100 text-green-700 py-1.5 rounded border border-green-200 text-[10px] font-bold flex items-center justify-center gap-2"
+                            >
+                                <Layers size={12}/> ENTREGAR TODOS ({selectedMarker.items.filter(i => i.status === 'pending').length})
+                            </button>
+                        )}
+
                         <div className="max-h-[150px] overflow-y-auto mb-2 space-y-2">
-                            {selectedMarker.items.map((item, idx) => (
+                            {selectedMarker.items.map((item) => (
                                 <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
                                     <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
                                     
