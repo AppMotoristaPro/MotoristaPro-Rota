@@ -8,7 +8,7 @@ GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
 files_content = {}
 
-# 1. APP.JSX (Algoritmo de Otimização Avançado)
+# 1. APP.JSX (Com safeStr restaurado e aplicado)
 files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
@@ -20,10 +20,18 @@ import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-m
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v39_smart';
+const DB_KEY = 'mp_db_v40_stable';
 const GOOGLE_KEY = "__GOOGLE_KEY__";
 
-// --- HELPERS VISUAIS ---
+// --- HELPERS ESSENCIAIS ---
+
+// CORREÇÃO: Função safeStr restaurada para prevenir erros
+const safeStr = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') return JSON.stringify(val); // Previne erro React #31
+    return String(val).trim();
+};
+
 const getMarkerIcon = (status, isCurrent) => {
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; 
@@ -57,16 +65,16 @@ const groupStopsByStopName = (stops) => {
     const groups = {};
     
     stops.forEach(stop => {
-        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
-        const key = rawName.trim().toLowerCase();
+        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
+        const key = rawName.toLowerCase();
 
         if (!groups[key]) {
             groups[key] = {
                 id: key,
-                lat: stop.lat,
-                lng: stop.lng,
+                lat: Number(stop.lat) || 0,
+                lng: Number(stop.lng) || 0,
                 mainName: rawName,
-                mainAddress: stop.address,
+                mainAddress: safeStr(stop.address),
                 items: [],
                 status: 'pending'
             };
@@ -78,9 +86,8 @@ const groupStopsByStopName = (stops) => {
     const seenKeys = new Set();
 
     stops.forEach(stop => {
-        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
-        const key = rawName.trim().toLowerCase();
-        
+        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
+        const key = rawName.toLowerCase();
         if (!seenKeys.has(key)) {
             const group = groups[key];
             const total = group.items.length;
@@ -99,23 +106,20 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-// Métricas Ajustadas V39
-const calculateRemainingMetrics = (stops, userPos) => {
+const calculateMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-    
     const pendingStops = stops.filter(s => s.status === 'pending');
     if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
 
     let totalKm = 0;
-    let currentLat = userPos ? userPos.lat : pendingStops[0].lat;
-    let currentLng = userPos ? userPos.lng : pendingStops[0].lng;
+    let currentLat = userPos ? userPos.lat : (pendingStops[0]?.lat || 0);
+    let currentLng = userPos ? userPos.lng : (pendingStops[0]?.lng || 0);
 
     const calcDist = (lat1, lon1, lat2, lon2) => {
         const R = 6371; 
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
         return R * c;
     };
@@ -128,9 +132,7 @@ const calculateRemainingMetrics = (stops, userPos) => {
 
     const realKm = totalKm * 1.5; 
     const avgSpeed = 25; 
-    const serviceTimePerPackage = 1.5;
-    const serviceTimeTotal = pendingStops.length * serviceTimePerPackage;
-    
+    const serviceTimeTotal = pendingStops.length * 1.5; // 1m30s por pacote
     const travelTimeMin = (realKm / avgSpeed * 60);
     const totalMin = travelTimeMin + serviceTimeTotal;
     
@@ -144,51 +146,40 @@ const calculateRemainingMetrics = (stops, userPos) => {
     };
 };
 
-// --- ALGORITMO OTIMIZAÇÃO V2 (2-OPT) ---
+// --- ALGORITMO 2-OPT (Otimização Avançada) ---
 const solveTSP = (stops, startPos) => {
-    // 1. Matriz de Distâncias Simplificada
-    const points = [startPos, ...stops]; // Ponto 0 é o start
+    const points = [startPos, ...stops]; 
     const n = points.length;
-    
     const dist = (p1, p2) => Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
     
-    // 2. Nearest Neighbor (Solução Inicial Rápida)
-    let path = [0]; // Começa do start
+    let path = [0]; 
     let visited = new Set([0]);
     
+    // 1. Nearest Neighbor
     while (path.length < n) {
         let last = points[path[path.length - 1]];
         let bestDist = Infinity;
         let bestIdx = -1;
-        
-        for (let i = 1; i < n; i++) { // Começa de 1 pq 0 é start fixo
+        for (let i = 1; i < n; i++) {
             if (!visited.has(i)) {
                 let d = dist(last, points[i]);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestIdx = i;
-                }
+                if (d < bestDist) { bestDist = d; bestIdx = i; }
             }
         }
         path.push(bestIdx);
         visited.add(bestIdx);
     }
     
-    // 3. 2-Opt (Refinamento para remover cruzamentos/zigue-zagues)
+    // 2. 2-Opt
     let improved = true;
     while (improved) {
         improved = false;
-        for (let i = 1; i < n - 2; i++) { // Não mexe no start (índice 0)
+        for (let i = 1; i < n - 2; i++) { 
             for (let j = i + 1; j < n; j++) {
-                if (j - i === 1) continue; // Pontos adjacentes, ignora
-                
-                // Distância atual: A->B + C->D
+                if (j - i === 1) continue; 
                 const d1 = dist(points[path[i-1]], points[path[i]]) + dist(points[path[j-1]], points[path[j]]);
-                // Distância nova (cruzada): A->C + B->D
                 const d2 = dist(points[path[i-1]], points[path[j-1]]) + dist(points[path[i]], points[path[j]]);
-                
                 if (d2 < d1) {
-                    // Inverte o segmento entre i e j-1
                     const newSegment = path.slice(i, j).reverse();
                     path.splice(i, j - i, ...newSegment);
                     improved = true;
@@ -196,11 +187,8 @@ const solveTSP = (stops, startPos) => {
             }
         }
     }
-    
-    // Remove o ponto de partida (dummy) e retorna os stops ordenados
     path.shift(); 
-    // Mapeia de volta para os objetos stops originais (path tem indices baseados em 'points', mas stops é points[1:])
-    return path.map(idx => points[idx]); // points[idx] já é o objeto stop correto
+    return path.map(idx => points[idx]); 
 };
 
 export default function App() {
@@ -218,7 +206,6 @@ export default function App() {
   const [showStartModal, setShowStartModal] = useState(false);
   const [customStartAddr, setCustomStartAddr] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
-  
   const [selectedMarker, setSelectedMarker] = useState(null);
 
   const { isLoaded } = useJsApiLoader({
@@ -276,10 +263,10 @@ export default function App() {
             
             return {
                 id: Date.now() + i + Math.random(),
-                name: String(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
-                stopName: String(k['stop'] || k['parada'] || `Parada ${i+1}`), 
-                recipient: String(k['recebedor'] || k['contato'] || k['cliente'] || 'Recebedor'),
-                address: String(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
+                name: safeStr(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
+                stopName: safeStr(k['stop'] || k['parada'] || `Parada ${i+1}`), 
+                recipient: safeStr(k['recebedor'] || k['contato'] || 'Recebedor'),
+                address: safeStr(k['destination address'] || k['endereço'] || '---'),
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
                 lng: parseFloat(k['longitude'] || k['long'] || k['lng'] || 0),
                 status: 'pending'
@@ -298,7 +285,7 @@ export default function App() {
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Excluir rota?")) {
+      if(confirm("Excluir esta rota?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
@@ -306,7 +293,6 @@ export default function App() {
 
   const handleOptimizeClick = () => setShowStartModal(true);
 
-  // --- NOVA LÓGICA DE OTIMIZAÇÃO (V39) ---
   const runOptimization = (startPos) => {
       setIsOptimizing(true);
       setShowStartModal(false);
@@ -317,11 +303,8 @@ export default function App() {
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
       
-      // Usa o novo algoritmo 2-Opt para evitar cruzamentos
       let optimized = [];
       if (pending.length > 0) {
-          // Precisamos agrupar logicamente paradas com mesmo local para o otimizador não separar
-          // Mas como o 2-opt trabalha com geometria, se tiverem lat/lng iguais, ele naturalmente agrupa
           optimized = solveTSP(pending, startPos);
       }
 
@@ -329,7 +312,7 @@ export default function App() {
       updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...optimized], optimized: true };
       setRoutes(updatedRoutes);
       setIsOptimizing(false);
-      showToast("Rota Otimizada com IA!");
+      showToast("Rota Otimizada!");
   };
 
   const confirmGpsStart = async () => {
@@ -382,8 +365,8 @@ export default function App() {
       if (!searchQuery) return groupedStops;
       const lower = searchQuery.toLowerCase();
       return groupedStops.filter(g => 
-          g.mainName.toLowerCase().includes(lower) || 
-          g.mainAddress.toLowerCase().includes(lower)
+          safeStr(g.mainName).toLowerCase().includes(lower) || 
+          safeStr(g.mainAddress).toLowerCase().includes(lower)
       );
   }, [groupedStops, searchQuery]);
 
@@ -411,7 +394,7 @@ export default function App() {
               <div className="space-y-4">
                   {routes.map(r => (
                       <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer">
-                          <h3 className="font-bold text-lg">{r.name}</h3>
+                          <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
                           <div className="flex gap-4 text-sm text-slate-500 mt-2">
                               <span><Package size={14} className="inline mr-1"/>{r.stops.length} pacotes</span>
                               {r.optimized && <span className="text-green-600 font-bold"><Check size={14} className="inline mr-1"/>Otimizada</span>}
@@ -455,7 +438,7 @@ export default function App() {
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
-                  <h2 className="font-bold truncate px-4 flex-1 text-center">{activeRoute.name}</h2>
+                  <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
                   <div className="flex gap-2">
                       <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
                       <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
@@ -595,7 +578,7 @@ export default function App() {
 }'''
 
 def main():
-    print(f"🚀 ATUALIZAÇÃO V39 (SMART LOGIC) - {APP_NAME}")
+    print(f"🚀 ATUALIZAÇÃO V40 (FIXED CRASH) - {APP_NAME}")
     
     # 1. Substituir a chave no código
     final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
@@ -603,10 +586,10 @@ def main():
     print("\n📝 Atualizando App.jsx...")
     with open("src/App.jsx", 'w', encoding='utf-8') as f:
         f.write(final_app_jsx)
-
+        
     print("\n☁️ Enviando para GitHub...")
     subprocess.run("git add .", shell=True)
-    subprocess.run('git commit -m "feat: V39 Advanced 2-Opt Optimization & Smart Logic"', shell=True)
+    subprocess.run('git commit -m "fix: V40 Safety First - safeStr Helper"', shell=True)
     subprocess.run("git push origin main", shell=True)
     
     try: os.remove(__file__)
