@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -9,16 +9,10 @@ import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-m
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v38_smart';
+const DB_KEY = 'mp_db_v39_smart';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
-// --- HELPERS ---
-const safeStr = (val) => {
-    if (val === null || val === undefined) return '';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return String(val).trim();
-};
-
+// --- HELPERS VISUAIS ---
 const getMarkerIcon = (status, isCurrent) => {
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; 
@@ -46,21 +40,22 @@ const mapOptions = {
     clickableIcons: false
 };
 
+// --- LÓGICA DE DADOS ---
 const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
     const groups = {};
     
     stops.forEach(stop => {
-        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
-        const key = rawName.toLowerCase();
+        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
+        const key = rawName.trim().toLowerCase();
 
         if (!groups[key]) {
             groups[key] = {
                 id: key,
-                lat: Number(stop.lat) || 0,
-                lng: Number(stop.lng) || 0,
-                mainName: rawName, // Nome da Parada (coluna stop)
-                mainAddress: safeStr(stop.address),
+                lat: stop.lat,
+                lng: stop.lng,
+                mainName: rawName,
+                mainAddress: stop.address,
                 items: [],
                 status: 'pending'
             };
@@ -72,8 +67,9 @@ const groupStopsByStopName = (stops) => {
     const seenKeys = new Set();
 
     stops.forEach(stop => {
-        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
-        const key = rawName.toLowerCase();
+        const rawName = stop.stopName ? String(stop.stopName) : 'Local Sem Nome';
+        const key = rawName.trim().toLowerCase();
+        
         if (!seenKeys.has(key)) {
             const group = groups[key];
             const total = group.items.length;
@@ -92,20 +88,23 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-const calculateMetrics = (stops, userPos) => {
+// Métricas Ajustadas V39
+const calculateRemainingMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
+    
     const pendingStops = stops.filter(s => s.status === 'pending');
     if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
 
     let totalKm = 0;
-    let currentLat = userPos ? userPos.lat : (pendingStops[0]?.lat || 0);
-    let currentLng = userPos ? userPos.lng : (pendingStops[0]?.lng || 0);
+    let currentLat = userPos ? userPos.lat : pendingStops[0].lat;
+    let currentLng = userPos ? userPos.lng : pendingStops[0].lng;
 
     const calcDist = (lat1, lon1, lat2, lon2) => {
         const R = 6371; 
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
         return R * c;
     };
@@ -118,16 +117,79 @@ const calculateMetrics = (stops, userPos) => {
 
     const realKm = totalKm * 1.5; 
     const avgSpeed = 25; 
-    const travelTimeMin = (realKm / avgSpeed * 60);
+    const serviceTimePerPackage = 1.5;
+    const serviceTimeTotal = pendingStops.length * serviceTimePerPackage;
     
-    const h = Math.floor(travelTimeMin / 60);
-    const m = Math.floor(travelTimeMin % 60);
+    const travelTimeMin = (realKm / avgSpeed * 60);
+    const totalMin = travelTimeMin + serviceTimeTotal;
+    
+    const h = Math.floor(totalMin / 60);
+    const m = Math.floor(totalMin % 60);
 
     return { 
         km: realKm.toFixed(1), 
         time: `${h}h ${m}m`, 
         remainingPackages: pendingStops.length 
     };
+};
+
+// --- ALGORITMO OTIMIZAÇÃO V2 (2-OPT) ---
+const solveTSP = (stops, startPos) => {
+    // 1. Matriz de Distâncias Simplificada
+    const points = [startPos, ...stops]; // Ponto 0 é o start
+    const n = points.length;
+    
+    const dist = (p1, p2) => Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
+    
+    // 2. Nearest Neighbor (Solução Inicial Rápida)
+    let path = [0]; // Começa do start
+    let visited = new Set([0]);
+    
+    while (path.length < n) {
+        let last = points[path[path.length - 1]];
+        let bestDist = Infinity;
+        let bestIdx = -1;
+        
+        for (let i = 1; i < n; i++) { // Começa de 1 pq 0 é start fixo
+            if (!visited.has(i)) {
+                let d = dist(last, points[i]);
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestIdx = i;
+                }
+            }
+        }
+        path.push(bestIdx);
+        visited.add(bestIdx);
+    }
+    
+    // 3. 2-Opt (Refinamento para remover cruzamentos/zigue-zagues)
+    let improved = true;
+    while (improved) {
+        improved = false;
+        for (let i = 1; i < n - 2; i++) { // Não mexe no start (índice 0)
+            for (let j = i + 1; j < n; j++) {
+                if (j - i === 1) continue; // Pontos adjacentes, ignora
+                
+                // Distância atual: A->B + C->D
+                const d1 = dist(points[path[i-1]], points[path[i]]) + dist(points[path[j-1]], points[path[j]]);
+                // Distância nova (cruzada): A->C + B->D
+                const d2 = dist(points[path[i-1]], points[path[j-1]]) + dist(points[path[i]], points[path[j]]);
+                
+                if (d2 < d1) {
+                    // Inverte o segmento entre i e j-1
+                    const newSegment = path.slice(i, j).reverse();
+                    path.splice(i, j - i, ...newSegment);
+                    improved = true;
+                }
+            }
+        }
+    }
+    
+    // Remove o ponto de partida (dummy) e retorna os stops ordenados
+    path.shift(); 
+    // Mapeia de volta para os objetos stops originais (path tem indices baseados em 'points', mas stops é points[1:])
+    return path.map(idx => points[idx]); // points[idx] já é o objeto stop correto
 };
 
 export default function App() {
@@ -139,8 +201,13 @@ export default function App() {
   const [userPos, setUserPos] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [toast, setToast] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [customStartAddr, setCustomStartAddr] = useState('');
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  
   const [selectedMarker, setSelectedMarker] = useState(null);
 
   const { isLoaded } = useJsApiLoader({
@@ -161,6 +228,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(DB_KEY, JSON.stringify(routes));
   }, [routes]);
+
+  const showToast = (msg, type = 'success') => {
+      setToast({ msg, type });
+      setTimeout(() => setToast(null), 2000);
+  };
 
   const getCurrentLocation = async (force = false) => {
       try {
@@ -193,10 +265,10 @@ export default function App() {
             
             return {
                 id: Date.now() + i + Math.random(),
-                name: safeStr(k['stop'] || k['parada'] || k['cliente'] || `Parada ${i+1}`),
-                stopName: safeStr(k['stop'] || k['parada'] || `Parada ${i+1}`), 
-                recipient: safeStr(k['recebedor'] || k['contato'] || 'Recebedor'),
-                address: safeStr(k['destination address'] || k['endereço'] || '---'),
+                name: String(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
+                stopName: String(k['stop'] || k['parada'] || `Parada ${i+1}`), 
+                recipient: String(k['recebedor'] || k['contato'] || k['cliente'] || 'Recebedor'),
+                address: String(k['destination address'] || k['endereço'] || k['endereco'] || '---'),
                 lat: parseFloat(k['latitude'] || k['lat'] || 0),
                 lng: parseFloat(k['longitude'] || k['long'] || k['lng'] || 0),
                 status: 'pending'
@@ -215,19 +287,18 @@ export default function App() {
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Excluir esta rota?")) {
+      if(confirm("Excluir rota?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
   };
 
-  // --- OTIMIZAÇÃO INTELIGENTE (IDA E VOLTA) ---
-  const optimizeRoute = async () => {
-      setIsOptimizing(true);
-      let currentPos = userPos;
-      if (!currentPos) currentPos = await getCurrentLocation(true);
-      if (!currentPos) { setIsOptimizing(false); alert("Ative o GPS."); return; }
+  const handleOptimizeClick = () => setShowStartModal(true);
 
+  // --- NOVA LÓGICA DE OTIMIZAÇÃO (V39) ---
+  const runOptimization = (startPos) => {
+      setIsOptimizing(true);
+      setShowStartModal(false);
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
@@ -235,40 +306,39 @@ export default function App() {
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
       
+      // Usa o novo algoritmo 2-Opt para evitar cruzamentos
       let optimized = [];
-      
-      // Ponto de Partida e Chegada é a posição atual
-      const startPoint = currentPos;
-      let pointer = startPoint;
-
-      // 1. Organiza os pontos para formar um ciclo eficiente
-      while(pending.length > 0) {
-          let nearestIdx = -1;
-          let minDist = Infinity;
-          
-          for(let i=0; i<pending.length; i++) {
-              // Calcula distância até o ponteiro atual
-              const dToNext = Math.pow(pending[i].lat - pointer.lat, 2) + Math.pow(pending[i].lng - pointer.lng, 2);
-              
-              // HEURÍSTICA DE RETORNO:
-              // Verifica se este ponto nos afasta demais do ponto de origem prematuramente
-              // (Simplificado: Nearest Neighbor tende a criar bons ciclos se o último ponto estiver perto do início)
-              
-              if (dToNext < minDist) { 
-                  minDist = dToNext; 
-                  nearestIdx = i; 
-              }
-          }
-          
-          optimized.push(pending[nearestIdx]);
-          pointer = pending[nearestIdx];
-          pending.splice(nearestIdx, 1);
+      if (pending.length > 0) {
+          // Precisamos agrupar logicamente paradas com mesmo local para o otimizador não separar
+          // Mas como o 2-opt trabalha com geometria, se tiverem lat/lng iguais, ele naturalmente agrupa
+          optimized = solveTSP(pending, startPos);
       }
 
       const updatedRoutes = [...routes];
       updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...optimized], optimized: true };
       setRoutes(updatedRoutes);
       setIsOptimizing(false);
+      showToast("Rota Otimizada com IA!");
+  };
+
+  const confirmGpsStart = async () => {
+      let pos = userPos;
+      if (!pos) pos = await getCurrentLocation(true);
+      if (pos) runOptimization(pos);
+      else alert("GPS indisponível.");
+  };
+
+  const confirmAddressStart = async () => {
+      if(!customStartAddr) return;
+      setIsGeocoding(true);
+      try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(customStartAddr)}`);
+          const data = await response.json();
+          setIsGeocoding(false);
+          if(data && data.length > 0) {
+              runOptimization({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+          } else { alert("Endereço não encontrado."); }
+      } catch(e) { setIsGeocoding(false); alert("Erro de conexão."); }
   };
 
   const setStatus = (stopId, status) => {
@@ -280,6 +350,7 @@ export default function App() {
       if (stopIndex !== -1) {
           route.stops[stopIndex].status = status;
           setRoutes(updatedRoutes);
+          if (status === 'success') showToast("Entrega OK!");
       }
   };
 
@@ -300,14 +371,14 @@ export default function App() {
       if (!searchQuery) return groupedStops;
       const lower = searchQuery.toLowerCase();
       return groupedStops.filter(g => 
-          safeStr(g.mainName).toLowerCase().includes(lower) || 
-          safeStr(g.mainAddress).toLowerCase().includes(lower)
+          g.mainName.toLowerCase().includes(lower) || 
+          g.mainAddress.toLowerCase().includes(lower)
       );
   }, [groupedStops, searchQuery]);
 
   const metrics = useMemo(() => {
       if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-      return calculateMetrics(activeRoute.stops, userPos);
+      return calculateRemainingMetrics(activeRoute.stops, userPos);
   }, [activeRoute, userPos, routes]);
 
   useEffect(() => {
@@ -329,7 +400,7 @@ export default function App() {
               <div className="space-y-4">
                   {routes.map(r => (
                       <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer">
-                          <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
+                          <h3 className="font-bold text-lg">{r.name}</h3>
                           <div className="flex gap-4 text-sm text-slate-500 mt-2">
                               <span><Package size={14} className="inline mr-1"/>{r.stops.length} pacotes</span>
                               {r.optimized && <span className="text-green-600 font-bold"><Check size={14} className="inline mr-1"/>Otimizada</span>}
@@ -360,10 +431,20 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
+          {showStartModal && (
+              <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                  <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
+                      <div className="flex justify-between items-center"><h3 className="text-xl font-bold">Partida</h3><button onClick={() => setShowStartModal(false)}><X/></button></div>
+                      <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><div className="text-left"><span className="block font-bold">Usar GPS Atual</span></div></button>
+                      <div className="flex gap-2"><input type="text" className="flex-1 p-3 bg-slate-50 rounded-xl border text-sm" placeholder="Ou digite endereço..." value={customStartAddr} onChange={e => setCustomStartAddr(e.target.value)}/><button onClick={confirmAddressStart} disabled={isGeocoding} className="bg-slate-900 text-white p-3 rounded-xl">{isGeocoding ? <Loader2 className="animate-spin"/> : <Check/>}</button></div>
+                  </div>
+              </div>
+          )}
+
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
-                  <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
+                  <h2 className="font-bold truncate px-4 flex-1 text-center">{activeRoute.name}</h2>
                   <div className="flex gap-2">
                       <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
                       <button onClick={() => deleteRoute(activeRoute.id)}><Trash2 size={20} className="text-red-400"/></button>
@@ -390,7 +471,7 @@ export default function App() {
               
               {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
@@ -416,7 +497,6 @@ export default function App() {
                               <MarkerF 
                                 key={g.id} 
                                 position={{ lat: g.lat, lng: g.lng }}
-                                // AJUSTE 1: Label Numérico
                                 label={{ text: String(idx + 1), color: "white", fontSize: "12px", fontWeight: "bold" }}
                                 icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
                                 onClick={() => setSelectedMarker(g)}
@@ -427,7 +507,6 @@ export default function App() {
                           {selectedMarker && (
                             <InfoWindowF position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} onCloseClick={() => setSelectedMarker(null)}>
                                 <div className="p-2 min-w-[200px]">
-                                    {/* AJUSTE 2: Título no InfoWindow */}
                                     <h3 className="font-bold text-slate-900 text-sm mb-1">Parada: {safeStr(selectedMarker.mainName)}</h3>
                                     <p className="text-xs text-slate-500 mb-2">{safeStr(selectedMarker.mainAddress)}</p>
                                     <div className="text-xs font-bold text-blue-600 mb-3">{selectedMarker.items.length} pacotes</div>
@@ -443,9 +522,7 @@ export default function App() {
                   {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
-                          {/* AJUSTE 2: Título do Destaque */}
                           <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {safeStr(nextGroup.mainName)}</h3>
-                          {/* AJUSTE 2: Subtítulo do Destaque */}
                           <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
                           <div className="space-y-3 border-t border-slate-100 pt-3">
                               {nextGroup.items.map((item, idx) => {
@@ -454,7 +531,6 @@ export default function App() {
                                       <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
                                           <div className="mb-3">
                                               <span className="text-xs font-bold text-blue-600 block mb-1">PACOTE #{idx + 1}</span>
-                                              {/* AJUSTE 4: Endereço como 'Endereço' */}
                                               <span className="text-sm font-bold text-slate-800 block leading-tight">{safeStr(item.address)}</span>
                                           </div>
                                           <div className="flex gap-2 w-full">
@@ -479,9 +555,7 @@ export default function App() {
                               <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
                                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : (idx + 1)}</div>
                                   <div className="flex-1 min-w-0">
-                                      {/* AJUSTE 2: Título da Lista */}
                                       <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {safeStr(group.mainName)}</h4></div>
-                                      {/* AJUSTE 2: Subtítulo da Lista */}
                                       <p className="text-xs text-slate-400 truncate">{group.items.length} pacotes a serem entregues nessa parada</p>
                                   </div>
                                   {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 rounded-full"><Check size={18}/></button>)}
@@ -491,8 +565,7 @@ export default function App() {
                                       {group.items.map((item, subIdx) => (
                                           <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
                                               <div className="mb-2">
-                                                  {/* AJUSTE 4: Endereço Interno */}
-                                                  <span className="text-[10px] font-bold text-blue-500 block">Endereço</span>
+                                                  <span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span>
                                                   <span className="text-sm font-bold text-slate-700 block">{safeStr(item.address)}</span>
                                               </div>
                                               {item.status === 'pending' ? (<div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button></div>) : (<span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>)}
