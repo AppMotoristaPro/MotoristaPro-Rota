@@ -1,4 +1,16 @@
-import React from 'react';
+import os
+import shutil
+import datetime
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+BACKUP_DIR = "backup"
+TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"evolucao_v3_{TIMESTAMP}")
+
+FILES_TO_WRITE = {
+    # ATUALIZAÇÃO DO COMPONENTE DE LISTA (Itens 2, 3 e 7 do arquivo)
+    "src/components/RouteList.jsx": """import React from 'react';
 import { Check, ChevronUp, ChevronDown, Layers } from 'lucide-react';
 
 export default function RouteList({ 
@@ -79,3 +91,88 @@ export default function RouteList({
         </div>
     );
 }
+""",
+
+    # ATUALIZAÇÃO DO MAPA (Item 6 e 8)
+    "src/components/MapView.jsx": """import React, { useState } from 'react';
+import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
+import { Package, Navigation } from 'lucide-react';
+
+export default function MapView({ userPos, groupedStops, directionsResponse, nextGroup, openNav, isLoaded }) {
+    const [selected, setSelected] = useState(null);
+
+    if (!isLoaded) return <div className="h-full flex items-center justify-center">Carregando Mapa...</div>;
+
+    return (
+        <GoogleMap
+            mapContainerStyle={{ width: '100%', height: '100%' }}
+            center={userPos || { lat: -23.55, lng: -46.63 }}
+            zoom={14}
+            options={{ disableDefaultUI: true }}
+        >
+            {directionsResponse && <DirectionsRenderer directions={directionsResponse} options={{ suppressMarkers: true }} />}
+            
+            {groupedStops.map((g, idx) => (
+                <MarkerF 
+                    key={g.id} 
+                    position={{ lat: g.lat, lng: g.lng }}
+                    onClick={() => setSelected(g)}
+                    label={(!directionsResponse) ? { text: String(idx + 1), color: 'white' } : null}
+                />
+            ))}
+
+            {selected && (
+                <InfoWindowF position={{ lat: selected.lat, lng: selected.lng }} onCloseClick={() => setSelected(null)}>
+                    <div className="p-2 min-w-[180px]">
+                        <p className="font-bold text-sm">{selected.mainName}</p>
+                        <div className="flex items-center gap-2 text-blue-600 font-bold my-2">
+                            <Package size={14}/> {selected.items.length} volumes
+                        </div>
+                        <button onClick={() => openNav(selected.lat, selected.lng)} className="w-full bg-slate-900 text-white py-2 rounded text-xs flex items-center justify-center gap-2">
+                            <Navigation size={12}/> NAVEGAR
+                        </button>
+                    </div>
+                </InfoWindowF>
+            )}
+        </GoogleMap>
+    );
+}
+"""
+}
+
+def run_command(cmd):
+    try:
+        subprocess.run(cmd, check=True, shell=True)
+    except Exception as e:
+        print(f"Erro no comando {cmd}: {e}")
+
+def main():
+    print(f"--- Backup em {CURRENT_BACKUP_PATH} ---")
+    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
+    os.makedirs(CURRENT_BACKUP_PATH)
+    
+    # Backup arquivos sensíveis
+    for f in ["src/components/RouteList.jsx", "src/components/MapView.jsx"]:
+        if os.path.exists(f):
+            dest = os.path.join(CURRENT_BACKUP_PATH, os.path.basename(f))
+            shutil.copy2(f, dest)
+
+    print("--- Aplicando atualizações do Ajustesfinos.txt ---")
+    for path, content in FILES_TO_WRITE.items():
+        dir_name = os.path.dirname(path)
+        if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    print("--- Git Push Automático ---")
+    run_command("git add .")
+    run_command(f'git commit -m "Update v3: Ajustes Finos aplicados - {TIMESTAMP}"')
+    run_command("git push")
+
+    print("--- Auto-Destruição ---")
+    os.remove(__file__)
+    print("Concluído com sucesso.")
+
+if __name__ == "__main__":
+    main()
+
