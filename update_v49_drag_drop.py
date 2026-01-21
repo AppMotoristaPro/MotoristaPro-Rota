@@ -1,4 +1,94 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import os
+import shutil
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# 1. PACKAGE.JSON (Adicionando lib de Drag & Drop)
+files_content['package.json'] = '''{
+  "name": "motorista-pro-rota",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.263.1",
+    "papaparse": "^5.4.1",
+    "xlsx": "^0.18.5",
+    "@react-google-maps/api": "^2.19.2",
+    "@hello-pangea/dnd": "^16.3.0",
+    "@capacitor/geolocation": "^5.0.0",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/android": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5",
+    "@capacitor/cli": "^5.0.0"
+  }
+}'''
+
+# 2. CSS (Estilos para Drag & Drop)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Drag & Drop */
+.draggable-item {
+  touch-action: none; /* Importante para mobile */
+}
+.dragging {
+  opacity: 0.8;
+  transform: scale(1.02);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+  z-index: 100;
+}
+
+/* Cards */
+.modern-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  border: 1px solid #E2E8F0;
+  overflow: hidden;
+}
+
+/* Status */
+.border-l-status-pending { border-left: 5px solid #3B82F6; }
+.border-l-status-success { border-left: 5px solid #10B981; background: #F0FDF4; opacity: 0.6; }
+.border-l-status-failed { border-left: 5px solid #EF4444; background: #FEF2F2; opacity: 0.6; }
+
+/* Botões */
+.btn-primary { background: #2563EB; color: white; }
+.btn-secondary { background: #F1F5F9; color: #475569; }
+.fab-main { background: #0F172A; color: white; box-shadow: 0 4px 15px rgba(15,23,42,0.4); }
+'''
+
+# 3. APP.JSX (Implementação Completa V49)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, GripVertical, 
@@ -11,7 +101,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v49_dragdrop';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS ---
 const safeStr = (val) => {
@@ -392,3 +482,34 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V49 (DRAG & DROP) - {APP_NAME}")
+    
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📦 Instalando Drag & Drop...")
+    subprocess.run("npm install @hello-pangea/dnd", shell=True)
+    subprocess.run("npx cap sync", shell=True)
+
+    print("\n📝 Atualizando arquivos...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+        
+    for f in ['src/index.css', 'package.json']:
+        if f in files_content:
+            with open(f, 'w', encoding='utf-8') as file: file.write(files_content[f])
+
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V49 Manual Route Reorder & Native Nav Launch"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
