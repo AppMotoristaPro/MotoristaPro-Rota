@@ -6,16 +6,16 @@ import subprocess
 # --- CONFIGURAÇÕES ---
 BACKUP_DIR = "backup"
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v24_{TIMESTAMP}")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v25_{TIMESTAMP}")
 
-# CHAVE API
+# CHAVE API DO GOOGLE (Ainda usada para o MAPA visual e Geocoding)
 API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
-# --- ALGORITMO K-MEANS + GOOGLE OPTIMIZATION ---
+# --- CONTEÚDO DO APP.JSX ---
 APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, Sliders, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Check, RotateCcw, LayoutGrid
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Check, RotateCcw, Globe
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
@@ -25,7 +25,7 @@ import * as XLSX from 'xlsx';
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v62_kmeans_cluster';
+const DB_KEY = 'mp_db_v63_osrm_trip';
 const GOOGLE_KEY = "__API_KEY__";
 
 // --- HELPERS ---
@@ -89,7 +89,7 @@ const calculateTotalMetrics = (stops) => {
         totalKm += R * c;
     }
 
-    const realKm = totalKm * 1.4; 
+    const realKm = totalKm * 1.3; 
     const avgSpeed = 22; 
     const serviceTime = stops.length * 3; 
     const totalMin = (realKm / avgSpeed * 60) + serviceTime;
@@ -104,180 +104,63 @@ const calculateTotalMetrics = (stops) => {
     };
 };
 
-// --- TÉCNICA V24: K-MEANS CLUSTERING (INTELIGÊNCIA DE ZONAS) ---
-
-// Função matemática simples de distância
-const getDist = (a, b) => Math.sqrt(Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2));
-
-const kMeansCluster = (points, k) => {
-    if (k <= 0) return [points];
-    if (k >= points.length) return points.map(p => [p]);
-
-    // 1. Inicializa Centróides Aleatórios
-    let centroids = points.slice(0, k).map(p => ({ lat: p.lat, lng: p.lng }));
-    let clusters = Array(k).fill().map(() => []);
-    let iterations = 0;
-
-    // Loop de refinamento (10x é suficiente para rotas)
-    while (iterations < 10) {
-        // Limpa clusters
-        clusters = Array(k).fill().map(() => []);
-
-        // 2. Atribui cada ponto ao centróide mais próximo
-        points.forEach(p => {
-            let minDist = Infinity;
-            let clusterIdx = 0;
-            centroids.forEach((c, idx) => {
-                const d = getDist(p, c);
-                if (d < minDist) {
-                    minDist = d;
-                    clusterIdx = idx;
-                }
-            });
-            clusters[clusterIdx].push(p);
-        });
-
-        // 3. Recalcula a posição dos centróides
-        let changed = false;
-        centroids = centroids.map((c, idx) => {
-            const cluster = clusters[idx];
-            if (cluster.length === 0) return c; // Mantém se vazio
-            
-            const avgLat = cluster.reduce((sum, p) => sum + p.lat, 0) / cluster.length;
-            const avgLng = cluster.reduce((sum, p) => sum + p.lng, 0) / cluster.length;
-            
-            if (Math.abs(avgLat - c.lat) > 0.0001 || Math.abs(avgLng - c.lng) > 0.0001) changed = true;
-            
-            return { lat: avgLat, lng: avgLng };
-        });
-
-        if (!changed) break;
-        iterations++;
+// --- ALGORITMO V25: OSRM TRIP (Open Source Routing Machine) ---
+const optimizeWithOSRM = async (locations, startPos, updateProgress) => {
+    
+    // OSRM Trip API: Resolve o Caixeiro Viajante
+    // Formato: /trip/v1/driving/{lon},{lat};{lon},{lat}...?source=first&roundtrip=false
+    
+    // 1. Prepara Coordenadas
+    // OSRM usa Longitude, Latitude (inverso do Google)
+    // Primeiro ponto DEVE ser o startPos
+    const allPoints = [startPos, ...locations];
+    
+    // Limite de segurança: OSRM Demo costuma aceitar até ~75-100 pontos.
+    // Se tiver mais, precisaríamos dividir, mas vamos tentar direto primeiro.
+    if (allPoints.length > 100) {
+        alert("Atenção: Otimização OSRM funciona melhor com menos de 100 paradas por vez no modo gratuito.");
     }
-    
-    // Filtra clusters vazios
-    return clusters.filter(c => c.length > 0);
-};
 
-const optimizeWithKMeans = async (allLocations, startPos, updateProgress) => {
-    // 1. Definição de Clusters (Zonas)
-    // O Google aceita bem até 23 paradas. Vamos dividir as entregas em grupos de ~20.
-    const TARGET_SIZE = 20;
-    const k = Math.ceil(allLocations.length / TARGET_SIZE);
-    
-    // Executa K-Means para criar as Zonas
-    const zones = kMeansCluster(allLocations, k);
-    
-    // 2. Ordenação das Zonas (Macro Rota)
-    // Decide qual Zona fazer primeiro baseada na proximidade do centro da zona com a posição atual
-    let sortedZones = [];
-    let currentPivot = startPos;
-    let poolZones = [...zones];
+    const coordsString = allPoints.map(p => `${p.lng},${p.lat}`).join(';');
+    const url = `https://router.project-osrm.org/trip/v1/driving/${coordsString}?source=first&roundtrip=false&overview=false`;
 
-    while (poolZones.length > 0) {
-        let bestIdx = -1;
-        let minDist = Infinity;
+    try {
+        if (updateProgress) updateProgress("Enviando...");
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Erro no servidor OSRM (Tente novamente)");
+        
+        const data = await response.json();
+        if (data.code !== 'Ok') throw new Error(data.code);
 
-        // Calcula o centróide de cada zona restante
-        for (let i = 0; i < poolZones.length; i++) {
-            const zone = poolZones[i];
-            const centerLat = zone.reduce((sum, p) => sum + p.lat, 0) / zone.length;
-            const centerLng = zone.reduce((sum, p) => sum + p.lng, 0) / zone.length;
+        // 2. Processa a Resposta
+        // data.waypoints é um array de objetos Waypoint.
+        // Eles vêm ordenados pela sequência de visita otimizada!
+        // Cada objeto tem 'waypoint_index' que aponta para o índice original do array allPoints.
+        
+        const sortedWaypoints = data.waypoints;
+        const optimizedStops = [];
+
+        // O primeiro waypoint (índice 0 na resposta) deve ser o startPos (source=first).
+        // Nós queremos extrair apenas as entregas (locations).
+        
+        for (let i = 0; i < sortedWaypoints.length; i++) {
+            const wp = sortedWaypoints[i];
+            const originalIndex = wp.waypoint_index;
             
-            const dist = Math.sqrt(Math.pow(centerLat - currentPivot.lat, 2) + Math.pow(centerLng - currentPivot.lng, 2));
-            if (dist < minDist) {
-                minDist = dist;
-                bestIdx = i;
+            // originalIndex 0 é o startPos, ignoramos na lista final de entregas
+            if (originalIndex > 0) {
+                // Mapeia de volta: originalIndex 1 é locations[0]
+                optimizedStops.push(locations[originalIndex - 1]);
             }
         }
 
-        sortedZones.push(poolZones[bestIdx]);
-        // O novo pivô é o último ponto da zona escolhida (simplificação: ou o centro dela)
-        // Para ser mais preciso, vamos pegar o centro dela como referência futura
-        const chosenZone = poolZones[bestIdx];
-        const cLat = chosenZone.reduce((s, p) => s + p.lat, 0) / chosenZone.length;
-        const cLng = chosenZone.reduce((s, p) => s + p.lng, 0) / chosenZone.length;
-        currentPivot = { lat: cLat, lng: cLng };
-        
-        poolZones.splice(bestIdx, 1);
+        return optimizedStops;
+
+    } catch (e) {
+        console.error("OSRM Failed:", e);
+        throw e; // Repassa erro para fallback ou alerta
     }
-
-    // 3. Otimização Fina com Google dentro de cada Zona
-    const service = new window.google.maps.DirectionsService();
-    let finalRoute = [];
-    let batchOrigin = startPos;
-
-    for (let i = 0; i < sortedZones.length; i++) {
-        const zone = sortedZones[i];
-        
-        if (updateProgress) updateProgress(i + 1, sortedZones.length); // Feedback: "Zona 1/5..."
-
-        // Se a zona for pequena (1 ponto), só adiciona
-        if (zone.length <= 1) {
-            finalRoute.push(...zone);
-            batchOrigin = zone[0];
-            continue;
-        }
-
-        // Divide a zona em sub-lotes se for > 23 (raro com K correto, mas seguro)
-        // Como o K-means não garante tamanho exato, pode haver cluster gigante.
-        // Vamos fatiar se necessário.
-        let zoneChunks = [];
-        for (let j = 0; j < zone.length; j += 23) {
-            zoneChunks.push(zone.slice(j, j + 23));
-        }
-
-        for (let chunk of zoneChunks) {
-            // O destino é o último do chunk
-            // Mas espera: para otimizar, o google precisa de origem e destino.
-            // Vamos definir o ponto mais longe da origem como destino técnico para o Google ter espaço para trabalhar.
-            
-            // Acha o ponto mais distante da origem dentro do chunk
-            let furthestIdx = 0;
-            let maxD = -1;
-            chunk.forEach((p, idx) => {
-                const d = Math.pow(p.lat - batchOrigin.lat, 2) + Math.pow(p.lng - batchOrigin.lng, 2);
-                if (d > maxD) { maxD = d; furthestIdx = idx; }
-            });
-            
-            // Remove o destino da lista de waypoints
-            const dest = chunk[furthestIdx];
-            const waypoints = chunk.filter((_, idx) => idx !== furthestIdx)
-                                   .map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
-
-            try {
-                const res = await new Promise((resolve, reject) => {
-                    service.route({
-                        origin: batchOrigin,
-                        destination: dest,
-                        waypoints: waypoints,
-                        optimizeWaypoints: true, // Google organiza as ruas DENTRO da zona
-                        travelMode: 'DRIVING'
-                    }, (result, status) => {
-                        if (status === 'OK') resolve(result);
-                        else reject(status);
-                    });
-                });
-
-                const order = res.routes[0].waypoint_order;
-                const waypointsSource = chunk.filter((_, idx) => idx !== furthestIdx);
-                const orderedChunk = order.map(idx => waypointsSource[idx]);
-                orderedChunk.push(dest); // Põe o destino no final
-
-                finalRoute.push(...orderedChunk);
-                batchOrigin = dest; // Próxima origem é o fim desta zona
-                
-                await new Promise(r => setTimeout(r, 550));
-
-            } catch (e) {
-                console.warn("Google Zone Fail", e);
-                finalRoute.push(...chunk); // Fallback
-                batchOrigin = chunk[chunk.length - 1];
-            }
-        }
-    }
-
-    return finalRoute;
 };
 
 export default function App() {
@@ -290,7 +173,9 @@ export default function App() {
   const [userPos, setUserPos] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
+  
   const [optimizeProgress, setOptimizeProgress] = useState(null);
+
   const [toast, setToast] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
@@ -453,14 +338,14 @@ export default function App() {
       const done = currentRoute.stops.filter(s => s.status !== 'pending');
       
       const groups = groupStopsByStopName(pending);
+      // Extrai apenas 1 representativo de cada grupo para mandar pro OSRM
       const locations = groups.map(g => ({ ...g.items[0] })); 
       
       try {
-          setOptimizeProgress("Iniciando...");
-          // NOVA OTIMIZAÇÃO: K-MEANS ZONING
-          const optimizedLocs = await optimizeWithKMeans(locations, pos, (current, total) => {
-              setOptimizeProgress(`Zona ${current}/${total}`);
-          });
+          setOptimizeProgress("Enviando ao OSRM...");
+          
+          // NOVA OTIMIZAÇÃO: OSRM TRIP API
+          const optimizedLocs = await optimizeWithOSRM(locations, pos, setOptimizeProgress);
           
           const flatOptimized = [];
           optimizedLocs.forEach(optLoc => {
@@ -471,8 +356,10 @@ export default function App() {
           const updated = [...routes];
           updated[rIdx] = { ...updated[rIdx], stops: [...done, ...flatOptimized], optimized: true };
           setRoutes(updated);
-          showToast("Zoneamento Inteligente Concluído!");
-      } catch(e) { alert("Erro: " + e); }
+          showToast("Rota Otimizada com OSRM!");
+      } catch(e) { 
+          alert("Erro OSRM: " + e.message + ". Tente novamente em instantes."); 
+      }
       setIsOptimizing(false);
       setOptimizeProgress(null);
   };
@@ -558,6 +445,7 @@ export default function App() {
           <h2 className="text-2xl font-bold mb-8">Nova Rota</h2>
           <div className="space-y-6 flex-1">
               <input type="text" className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200" placeholder="Nome da Rota" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/>
+              
               {!importSummary ? (
                   <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl cursor-pointer">
                       <Upload className="mb-2 text-blue-500"/> 
@@ -587,10 +475,17 @@ export default function App() {
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
                   <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
+                  
                   <div className="flex gap-2">
-                      <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm"><RotateCcw size={20}/></button>
-                      <button onClick={deleteRoute} className="p-2 rounded-full bg-red-50 text-red-500 shadow-sm"><Trash2 size={20}/></button>
-                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>{showMap ? <List size={20}/> : <MapIcon size={20}/>}</button>
+                      <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm">
+                          <RotateCcw size={20}/>
+                      </button>
+                      <button onClick={deleteRoute} className="p-2 rounded-full bg-red-50 text-red-500 shadow-sm">
+                          <Trash2 size={20}/>
+                      </button>
+                      <button onClick={() => setShowMap(!showMap)} className={`p-2 rounded-full ${showMap ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>
+                          {showMap ? <List size={20}/> : <MapIcon size={20}/>}
+                      </button>
                   </div>
               </div>
               
@@ -614,15 +509,60 @@ export default function App() {
               
               {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
-                          {isOptimizing ? (<div className="flex items-center gap-2"><Loader2 className="animate-spin" size={18}/><span>{optimizeProgress ? `${optimizeProgress}` : 'Calculando...'}</span></div>) : (<div className="flex items-center gap-2"><LayoutGrid size={18}/> <span>Otimizar Zonas</span></div>)}
+                      <button 
+                          onClick={optimizeRoute} 
+                          disabled={isOptimizing} 
+                          className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white shadow-lg shadow-blue-200 transition-all ${!activeRoute.optimized ? 'bg-blue-600 animate-pulse' : 'bg-slate-700'}`}
+                      >
+                          {isOptimizing ? (
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="animate-spin" size={18}/>
+                                <span>{optimizeProgress || 'OSRM...'}</span>
+                              </div>
+                          ) : (
+                              <div className="flex items-center gap-2">
+                                <Globe size={18}/> <span>Otimizar (OSRM)</span>
+                              </div>
+                          )}
                       </button>
-                      {nextGroup && (<button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}><Navigation size={18}/> Iniciar Rota</button>)}
+                      
+                      {nextGroup && (
+                          <button 
+                              onClick={() => openNav(nextGroup.lat, nextGroup.lng)} 
+                              disabled={!activeRoute.optimized} 
+                              className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white shadow-lg shadow-green-200 transition-all ${activeRoute.optimized ? 'bg-green-600' : 'bg-gray-300 cursor-not-allowed'}`}
+                          >
+                              <Navigation size={18}/> Iniciar Rota
+                          </button>
+                      )}
                   </div>
               )}
           </div>
 
-          {showMap ? (<div className="flex-1 relative bg-slate-100"><MapView userPos={userPos} groupedStops={groupedStops} directionsResponse={directionsResponse} nextGroup={nextGroup} openNav={openNav} isLoaded={isLoaded}/></div>) : (<RouteList groupedStops={groupedStops} nextGroup={nextGroup} activeRoute={activeRoute} searchQuery={searchQuery} expandedGroups={expandedGroups} toggleGroup={toggleGroup} setStatus={setStatus} onReorder={handleReorder} onEditAddress={updateAddress}/>)}
+          {showMap ? (
+              <div className="flex-1 relative bg-slate-100">
+                  <MapView 
+                      userPos={userPos} 
+                      groupedStops={groupedStops} 
+                      directionsResponse={directionsResponse}
+                      nextGroup={nextGroup}
+                      openNav={openNav}
+                      isLoaded={isLoaded}
+                  />
+              </div>
+          ) : (
+              <RouteList 
+                  groupedStops={groupedStops}
+                  nextGroup={nextGroup}
+                  activeRoute={activeRoute}
+                  searchQuery={searchQuery}
+                  expandedGroups={expandedGroups}
+                  toggleGroup={toggleGroup}
+                  setStatus={setStatus}
+                  onReorder={handleReorder}
+                  onEditAddress={updateAddress}
+              />
+          )}
       </div>
   );
 }
@@ -646,12 +586,12 @@ def write_files():
         print(f"Escrevendo {path}")
 
 def main():
-    print(f"--- Iniciando V24 (K-Means Clustering) {TIMESTAMP} ---")
+    print(f"--- Iniciando V25 (OSRM) {TIMESTAMP} ---")
     write_files()
     
     print("--- Git Push ---")
     subprocess.run("git add .", shell=True)
-    subprocess.run(f'git commit -m "Update V24: K-Means Intelligence - {TIMESTAMP}"', shell=True)
+    subprocess.run(f'git commit -m "Update V25: OSRM Optimization Integration - {TIMESTAMP}"', shell=True)
     subprocess.run("git push", shell=True)
     
     os.remove(__file__)
