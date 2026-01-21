@@ -1,4 +1,130 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import os
+import shutil
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# 1. CSS (Visual Enterprise & Animações)
+files_content['src/index.css'] = '''@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #F1F5F9;
+  color: #1E293B;
+  -webkit-tap-highlight-color: transparent;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.map-container { width: 100%; height: 100%; }
+
+/* Cards Enterprise */
+.enterprise-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  border: 1px solid #E2E8F0;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s;
+  overflow: hidden;
+}
+.enterprise-card:active { transform: scale(0.98); }
+
+/* Highlight Card (Próxima Parada) */
+.highlight-card {
+  background: white;
+  border-radius: 24px;
+  box-shadow: 0 20px 40px -5px rgba(37, 99, 235, 0.15);
+  border: 2px solid #2563EB;
+  position: relative;
+  overflow: hidden;
+}
+.highlight-badge {
+  background: #2563EB;
+  color: white;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  padding: 6px 12px;
+  border-bottom-left-radius: 16px;
+  text-transform: uppercase;
+}
+
+/* Botões de Ação Premium */
+.btn-delivery {
+  height: 64px;
+  border-radius: 16px;
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.btn-success {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+  border: none;
+}
+.btn-success:active { transform: scale(0.96); box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2); }
+
+.btn-fail {
+  background: #FFF1F2;
+  color: #BE123C;
+  border: 2px solid #FECDD3;
+}
+.btn-fail:active { background: #FFE4E6; transform: scale(0.96); }
+
+/* Animação de Loading (Brain) */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.98);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.pulse-ring {
+  border: 4px solid #2563EB;
+  border-radius: 50%;
+  animation: ring-pulse 2s infinite;
+}
+@keyframes ring-pulse {
+  0% { width: 0; height: 0; opacity: 1; }
+  100% { width: 100px; height: 100px; opacity: 0; }
+}
+
+/* Status Bar Lateral */
+.status-bar { width: 6px; height: 100%; position: absolute; left: 0; top: 0; }
+.bg-status-pending { background-color: #3B82F6; }
+.bg-status-success { background-color: #10B981; }
+.bg-status-failed { background-color: #EF4444; }
+.bg-status-partial { background-color: #F59E0B; }
+
+/* Edit Mode Selection */
+.edit-selected {
+  border: 3px solid #2563EB !important;
+  transform: scale(1.1) !important;
+  z-index: 1000 !important;
+}
+'''
+
+# 2. APP.JSX (Lógica V52: Edit Map, Auto-Opt, Import Animation)
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -10,7 +136,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v52_enterprise';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS VISUAIS ---
 const getMarkerIcon = (status, isCurrent, isSelected, labelText) => {
@@ -555,3 +681,29 @@ export default function App() {
       </div>
   );
 }
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V52 (ENTERPRISE EDITION) - {APP_NAME}")
+    
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando arquivos...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+        
+    with open("src/index.css", 'w', encoding='utf-8') as f:
+        f.write(files_content['src/index.css'])
+
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "feat: V52 Enterprise UI, Auto-Optimize & Visual Edit"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
