@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save, Package, Pencil } from 'lucide-react';
+import { Check, ChevronUp, ChevronDown, Layers, Edit3, Save, Package } from 'lucide-react';
 
 export default function RouteList(props) {
     const { 
@@ -10,8 +10,7 @@ export default function RouteList(props) {
         expandedGroups = {}, 
         toggleGroup, 
         setStatus,
-        onReorder,
-        onEditAddress // Nova Prop
+        onReorder 
     } = props;
 
     const [isEditing, setIsEditing] = useState(false);
@@ -23,14 +22,6 @@ export default function RouteList(props) {
         items.forEach(item => {
             if (item.status === 'pending') setStatus(item.id, status);
         });
-    };
-
-    const handleEditAddressClick = (e, item) => {
-        e.stopPropagation();
-        const newAddr = prompt("Editar Endereço:", item.address);
-        if (newAddr && newAddr.trim() !== "") {
-            onEditAddress(item.id, newAddr);
-        }
     };
 
     const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
@@ -69,6 +60,7 @@ export default function RouteList(props) {
             {!isEditing && !searchQuery && nextGroup && activeRoute.optimized && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima Parada</div>
+                    
                     <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">Parada: {safeStr(nextGroup.mainName)}</h3>
                     <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                     
@@ -85,12 +77,9 @@ export default function RouteList(props) {
                         {nextGroup.items.map((item, idx) => (
                             item.status === 'pending' && (
                                 <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <Package size={14} className="text-blue-400"/>
-                                            <span className="text-xs font-bold text-slate-700">PACOTE {idx + 1}</span>
-                                        </div>
-                                        <button onClick={(e) => handleEditAddressClick(e, item)} className="text-slate-400 hover:text-blue-600"><Pencil size={12}/></button>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <Package size={14} className="text-blue-400"/>
+                                        <span className="text-xs font-bold text-slate-700">PACOTE {idx + 1}</span>
                                     </div>
                                     <p className="text-xs font-medium text-slate-600 mb-3 ml-6">{item.address}</p>
                                     <div className="flex gap-2">
@@ -142,12 +131,9 @@ export default function RouteList(props) {
                             <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
                                 {group.items.map((item) => (
                                     <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div>
-                                                <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
-                                                <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
-                                            </div>
-                                            {item.status === 'pending' && <button onClick={(e) => handleEditAddressClick(e, item)} className="text-slate-300 hover:text-blue-600"><Pencil size={12}/></button>}
+                                        <div className="mb-2">
+                                            <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
+                                            <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
                                         </div>
                                         {item.status === 'pending' ? (
                                             <div className="flex gap-2 w-full">
