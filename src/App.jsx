@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -9,16 +9,92 @@ import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-m
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v41_fixed';
+const DB_KEY = 'mp_db_v39_smart_opt';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
-// --- HELPERS ---
-const safeStr = (val) => {
-    if (val === null || val === undefined) return '';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return String(val).trim();
+// --- ALGORITMOS MATEMÁTICOS ---
+
+// Distância Haversine (Precisão Geográfica)
+const getDistance = (p1, p2) => {
+    const R = 6371; 
+    const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+    const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+    return R * c;
 };
 
+// Algoritmo 2-Opt (Remove cruzamentos e zigue-zagues)
+const solve2Opt = (stops, startPos) => {
+    // 1. Prepara os pontos: [Start, ...Stops]
+    // Usamos um objeto wrapper para manter a referência original
+    let route = [{ lat: startPos.lat, lng: startPos.lng, isStart: true }, ...stops];
+    
+    // 2. Nearest Neighbor para rota inicial (Gulosa)
+    // Isso cria uma rota "ok", mas com falhas de retorno
+    let visited = [route[0]];
+    let unvisited = route.slice(1);
+    
+    while (unvisited.length > 0) {
+        let current = visited[visited.length - 1];
+        let nearestIdx = 0;
+        let minInfo = Infinity;
+        
+        for (let i = 0; i < unvisited.length; i++) {
+            let d = getDistance(current, unvisited[i]);
+            if (d < minInfo) {
+                minInfo = d;
+                nearestIdx = i;
+            }
+        }
+        visited.push(unvisited[nearestIdx]);
+        unvisited.splice(nearestIdx, 1);
+    }
+    
+    route = visited; // Rota inicial gerada
+
+    // 3. Otimização 2-Opt (Refinamento)
+    // Tenta trocar arestas para diminuir a distância total
+    let improved = true;
+    let iterations = 0;
+    
+    // Limite de iterações para não travar o celular em rotas gigantes
+    while (improved && iterations < 1000) {
+        improved = false;
+        iterations++;
+        
+        // Começa de 1 para não mover o ponto de partida (índice 0)
+        for (let i = 1; i < route.length - 2; i++) {
+            for (let j = i + 1; j < route.length; j++) {
+                if (j - i === 1) continue; // Pontos adjacentes não mudam nada
+                
+                const pA = route[i - 1];
+                const pB = route[i];
+                const pC = route[j - 1];
+                const pD = route[j];
+                
+                // Distância atual
+                const d1 = getDistance(pA, pB) + getDistance(pC, pD);
+                // Distância se trocar (cruzar)
+                const d2 = getDistance(pA, pC) + getDistance(pB, pD);
+                
+                if (d2 < d1) {
+                    // Inverte o segmento entre i e j-1
+                    const newSegment = route.slice(i, j).reverse();
+                    route.splice(i, j - i, ...newSegment);
+                    improved = true;
+                }
+            }
+        }
+    }
+
+    // Remove o ponto de partida (dummy) e retorna apenas os stops
+    return route.slice(1);
+};
+
+
+// --- HELPERS VISUAIS ---
 const getMarkerIcon = (status, isCurrent) => {
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; 
@@ -33,17 +109,19 @@ const getMarkerIcon = (status, isCurrent) => {
         fillOpacity: 1,
         strokeWeight: 1.5,
         strokeColor: "#FFFFFF",
-        scale: isCurrent ? 1.8 : 1.2, 
+        scale: isCurrent ? 2.2 : 1.8, 
         anchor: { x: 12, y: 22 },
         labelOrigin: { x: 12, y: 10 }
     };
 };
 
 const mapContainerStyle = { width: '100%', height: '100%' };
-const mapOptions = {
-    disableDefaultUI: true,
-    zoomControl: false,
-    clickableIcons: false
+const mapOptions = { disableDefaultUI: true, zoomControl: false, clickableIcons: false };
+
+const safeStr = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val).trim();
 };
 
 const groupStopsByStopName = (stops) => {
@@ -92,89 +170,6 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-// CORREÇÃO AQUI: Nome da função unificado
-const calculateRemainingMetrics = (stops, userPos) => {
-    if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-    const pendingStops = stops.filter(s => s.status === 'pending');
-    if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
-
-    let totalKm = 0;
-    let currentLat = userPos ? userPos.lat : (pendingStops[0]?.lat || 0);
-    let currentLng = userPos ? userPos.lng : (pendingStops[0]?.lng || 0);
-
-    const calcDist = (lat1, lon1, lat2, lon2) => {
-        const R = 6371; 
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-        return R * c;
-    };
-
-    pendingStops.forEach(stop => {
-        totalKm += calcDist(currentLat, currentLng, stop.lat, stop.lng);
-        currentLat = stop.lat;
-        currentLng = stop.lng;
-    });
-
-    const realKm = totalKm * 1.5; 
-    const avgSpeed = 25; 
-    const serviceTimeTotal = pendingStops.length * 1.5;
-    const travelTimeMin = (realKm / avgSpeed * 60);
-    const totalMin = travelTimeMin + serviceTimeTotal;
-    
-    const h = Math.floor(totalMin / 60);
-    const m = Math.floor(totalMin % 60);
-
-    return { 
-        km: realKm.toFixed(1), 
-        time: `${h}h ${m}m`, 
-        remainingPackages: pendingStops.length 
-    };
-};
-
-const solveTSP = (stops, startPos) => {
-    const points = [startPos, ...stops]; 
-    const n = points.length;
-    const dist = (p1, p2) => Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
-    
-    let path = [0]; 
-    let visited = new Set([0]);
-    
-    while (path.length < n) {
-        let last = points[path[path.length - 1]];
-        let bestDist = Infinity;
-        let bestIdx = -1;
-        for (let i = 1; i < n; i++) {
-            if (!visited.has(i)) {
-                let d = dist(last, points[i]);
-                if (d < bestDist) { bestDist = d; bestIdx = i; }
-            }
-        }
-        path.push(bestIdx);
-        visited.add(bestIdx);
-    }
-    
-    let improved = true;
-    while (improved) {
-        improved = false;
-        for (let i = 1; i < n - 2; i++) { 
-            for (let j = i + 1; j < n; j++) {
-                if (j - i === 1) continue; 
-                const d1 = dist(points[path[i-1]], points[path[i]]) + dist(points[path[j-1]], points[path[j]]);
-                const d2 = dist(points[path[i-1]], points[path[j-1]]) + dist(points[path[i]], points[path[j]]);
-                if (d2 < d1) {
-                    const newSegment = path.slice(i, j).reverse();
-                    path.splice(i, j - i, ...newSegment);
-                    improved = true;
-                }
-            }
-        }
-    }
-    path.shift(); 
-    return path.map(idx => points[idx]); 
-};
-
 export default function App() {
   const [routes, setRoutes] = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(null);
@@ -187,9 +182,6 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
-  const [showStartModal, setShowStartModal] = useState(false);
-  const [customStartAddr, setCustomStartAddr] = useState('');
-  const [isGeocoding, setIsGeocoding] = useState(false);
   const [selectedMarker, setSelectedMarker] = useState(null);
 
   const { isLoaded } = useJsApiLoader({
@@ -229,7 +221,6 @@ export default function App() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     const processData = (d, isBin) => {
         let data = [];
@@ -273,54 +264,59 @@ export default function App() {
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Excluir esta rota?")) {
+      if(confirm("Excluir rota?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
   };
 
-  const handleOptimizeClick = () => setShowStartModal(true);
-
-  const runOptimization = (startPos) => {
+  // --- NOVA LÓGICA DE OTIMIZAÇÃO (2-OPT) ---
+  const optimizeRoute = async () => {
       setIsOptimizing(true);
-      setShowStartModal(false);
+      let currentPos = userPos;
+      if (!currentPos) currentPos = await getCurrentLocation(true);
+      if (!currentPos) { setIsOptimizing(false); alert("Ative o GPS."); return; }
+
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
       const currentRoute = routes[rIdx];
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
-      let optimized = [];
+      
+      let optimizedStops = [];
       
       if (pending.length > 0) {
-          optimized = solveTSP(pending, startPos);
+          // 1. Agrupar logicamente por local (Stop Name) para otimizar "prédios" inteiros
+          // Isso evita que o otimizador separe pacotes do mesmo prédio
+          const groupedMap = new Map();
+          pending.forEach(stop => {
+              // Usa lat/lng como chave para garantir unicidade geográfica
+              const key = `${stop.lat.toFixed(5)}_${stop.lng.toFixed(5)}`;
+              if(!groupedMap.has(key)) groupedMap.set(key, []);
+              groupedMap.get(key).push(stop);
+          });
+          
+          // Cria lista de "Locais Únicos" para o TSP
+          const uniqueLocations = Array.from(groupedMap.keys()).map(key => {
+             const items = groupedMap.get(key);
+             return { lat: items[0].lat, lng: items[0].lng, items: items };
+          });
+          
+          // Roda o 2-Opt nos locais únicos
+          const sortedLocations = solve2Opt(uniqueLocations, currentPos);
+          
+          // Desagrupa de volta para a lista plana
+          sortedLocations.forEach(loc => {
+              optimizedStops.push(...loc.items);
+          });
       }
 
       const updatedRoutes = [...routes];
-      updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...optimized], optimized: true };
+      updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...optimizedStops], optimized: true };
       setRoutes(updatedRoutes);
       setIsOptimizing(false);
-      showToast("Rota Otimizada!");
-  };
-
-  const confirmGpsStart = async () => {
-      let pos = userPos;
-      if (!pos) pos = await getCurrentLocation(true);
-      if (pos) runOptimization(pos);
-      else alert("GPS indisponível.");
-  };
-
-  const confirmAddressStart = async () => {
-      if(!customStartAddr) return;
-      setIsGeocoding(true);
-      try {
-          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(customStartAddr)}`);
-          const data = await response.json();
-          setIsGeocoding(false);
-          if(data && data.length > 0) {
-              runOptimization({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
-          } else { alert("Endereço não encontrado."); }
-      } catch(e) { setIsGeocoding(false); alert("Erro de conexão."); }
+      showToast("Rota Inteligente Gerada!");
   };
 
   const setStatus = (stopId, status) => {
@@ -344,6 +340,7 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
+  // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
@@ -357,10 +354,31 @@ export default function App() {
       );
   }, [groupedStops, searchQuery]);
 
-  // CORREÇÃO: Chamando a função com o nome correto
+  // Tempo Estimado
   const metrics = useMemo(() => {
       if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-      return calculateRemainingMetrics(activeRoute.stops, userPos);
+      
+      const pendingStops = activeRoute.stops.filter(s => s.status === 'pending');
+      if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
+
+      let totalKm = 0;
+      let currentLat = userPos ? userPos.lat : pendingStops[0].lat;
+      let currentLng = userPos ? userPos.lng : pendingStops[0].lng;
+
+      pendingStops.forEach(stop => {
+          totalKm += getDistance({lat: currentLat, lng: currentLng}, stop);
+          currentLat = stop.lat;
+          currentLng = stop.lng;
+      });
+
+      const realKm = totalKm * 1.5; 
+      const avgSpeed = 25; 
+      const serviceTime = pendingStops.length * 1.5;
+      const totalMin = (realKm / avgSpeed * 60) + serviceTime;
+      const h = Math.floor(totalMin / 60);
+      const m = Math.floor(totalMin % 60);
+
+      return { km: realKm.toFixed(1), time: `${h}h ${m}m`, remainingPackages: pendingStops.length };
   }, [activeRoute, userPos, routes]);
 
   useEffect(() => {
@@ -370,7 +388,6 @@ export default function App() {
       }
   }, [nextGroup, showMap, isLoaded, mapInstance]);
 
-  // --- VIEWS ---
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
           <div className="flex justify-between items-center mb-8">
@@ -382,20 +399,17 @@ export default function App() {
           ) : (
               <div className="space-y-4">
                   {routes.map(r => (
-                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer active:scale-98">
-                          <div className="flex justify-between items-start mb-2">
-                              <h3 className="font-bold text-lg text-slate-800 line-clamp-1">{safeStr(r.name)}</h3>
-                              <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{r.date}</span>
-                          </div>
-                          <div className="flex items-center gap-4 text-sm text-slate-500">
-                              <span className="flex items-center gap-1"><Package size={14}/> {r.stops.length} vols</span>
-                              {r.optimized && <span className="flex items-center gap-1 text-green-600"><Check size={14}/> Otimizada</span>}
+                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer">
+                          <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
+                          <div className="flex gap-4 text-sm text-slate-500 mt-2">
+                              <span><Package size={14} className="inline mr-1"/>{r.stops.length} pacotes</span>
+                              {r.optimized && <span className="text-green-600 font-bold"><Check size={14} className="inline mr-1"/>Otimizada</span>}
                           </div>
                       </div>
                   ))}
               </div>
           )}
-          <button onClick={() => setView('create')} className="fixed bottom-8 right-8 w-16 h-16 rounded-full fab-main flex items-center justify-center active:scale-90 transition"><Plus size={32}/></button>
+          <button onClick={() => setView('create')} className="fixed bottom-8 right-8 w-16 h-16 rounded-full fab-main flex items-center justify-center"><Plus size={32}/></button>
       </div>
   );
 
@@ -417,22 +431,6 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
-          {toast && (
-              <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
-                  {toast.msg}
-              </div>
-          )}
-
-          {showStartModal && (
-              <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                  <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
-                      <div className="flex justify-between items-center"><h3 className="text-xl font-bold">Partida</h3><button onClick={() => setShowStartModal(false)}><X/></button></div>
-                      <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><div className="text-left"><span className="block font-bold">Usar GPS Atual</span></div></button>
-                      <div className="flex gap-2"><input type="text" className="flex-1 p-3 bg-slate-50 rounded-xl border text-sm" placeholder="Ou digite endereço..." value={customStartAddr} onChange={e => setCustomStartAddr(e.target.value)}/><button onClick={confirmAddressStart} disabled={isGeocoding} className="bg-slate-900 text-white p-3 rounded-xl">{isGeocoding ? <Loader2 className="animate-spin"/> : <Check/>}</button></div>
-                  </div>
-              </div>
-          )}
-
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
                   <button onClick={() => setView('home')}><ArrowLeft/></button>
@@ -463,11 +461,11 @@ export default function App() {
               
               {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={optimizeRoute} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
+                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-gradient-green shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
                               <Navigation size={18}/> Navegar
                           </button>
                       )}
@@ -511,6 +509,11 @@ export default function App() {
               </div>
           ) : (
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
+                  {toast && (
+                      <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+                          {toast.msg}
+                      </div>
+                  )}
                   {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
                           <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
