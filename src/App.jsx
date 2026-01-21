@@ -9,15 +9,13 @@ import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-m
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v40_stable';
+const DB_KEY = 'mp_db_v41_fixed';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
-// --- HELPERS ESSENCIAIS ---
-
-// CORREÇÃO: Função safeStr restaurada para prevenir erros
+// --- HELPERS ---
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
-    if (typeof val === 'object') return JSON.stringify(val); // Previne erro React #31
+    if (typeof val === 'object') return JSON.stringify(val);
     return String(val).trim();
 };
 
@@ -48,7 +46,6 @@ const mapOptions = {
     clickableIcons: false
 };
 
-// --- LÓGICA DE DADOS ---
 const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
     const groups = {};
@@ -95,7 +92,8 @@ const groupStopsByStopName = (stops) => {
     return orderedGroups;
 };
 
-const calculateMetrics = (stops, userPos) => {
+// CORREÇÃO AQUI: Nome da função unificado
+const calculateRemainingMetrics = (stops, userPos) => {
     if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
     const pendingStops = stops.filter(s => s.status === 'pending');
     if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
@@ -121,7 +119,7 @@ const calculateMetrics = (stops, userPos) => {
 
     const realKm = totalKm * 1.5; 
     const avgSpeed = 25; 
-    const serviceTimeTotal = pendingStops.length * 1.5; // 1m30s por pacote
+    const serviceTimeTotal = pendingStops.length * 1.5;
     const travelTimeMin = (realKm / avgSpeed * 60);
     const totalMin = travelTimeMin + serviceTimeTotal;
     
@@ -135,7 +133,6 @@ const calculateMetrics = (stops, userPos) => {
     };
 };
 
-// --- ALGORITMO 2-OPT (Otimização Avançada) ---
 const solveTSP = (stops, startPos) => {
     const points = [startPos, ...stops]; 
     const n = points.length;
@@ -144,7 +141,6 @@ const solveTSP = (stops, startPos) => {
     let path = [0]; 
     let visited = new Set([0]);
     
-    // 1. Nearest Neighbor
     while (path.length < n) {
         let last = points[path[path.length - 1]];
         let bestDist = Infinity;
@@ -159,7 +155,6 @@ const solveTSP = (stops, startPos) => {
         visited.add(bestIdx);
     }
     
-    // 2. 2-Opt
     let improved = true;
     while (improved) {
         improved = false;
@@ -234,6 +229,7 @@ export default function App() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
     const processData = (d, isBin) => {
         let data = [];
@@ -261,8 +257,11 @@ export default function App() {
                 status: 'pending'
             };
         }).filter(i => i.lat !== 0);
+
         if (norm.length > 0) setTempStops(norm);
+        else alert("Erro: Sem coordenadas.");
     };
+
     if(file.name.endsWith('.csv')) { reader.onload = e => processData(e.target.result, false); reader.readAsText(file); }
     else { reader.onload = e => processData(e.target.result, true); reader.readAsBinaryString(file); }
   };
@@ -291,8 +290,8 @@ export default function App() {
       const currentRoute = routes[rIdx];
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
-      
       let optimized = [];
+      
       if (pending.length > 0) {
           optimized = solveTSP(pending, startPos);
       }
@@ -345,7 +344,6 @@ export default function App() {
       setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
   };
 
-  // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
@@ -359,6 +357,7 @@ export default function App() {
       );
   }, [groupedStops, searchQuery]);
 
+  // CORREÇÃO: Chamando a função com o nome correto
   const metrics = useMemo(() => {
       if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
       return calculateRemainingMetrics(activeRoute.stops, userPos);
@@ -371,6 +370,7 @@ export default function App() {
       }
   }, [nextGroup, showMap, isLoaded, mapInstance]);
 
+  // --- VIEWS ---
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
           <div className="flex justify-between items-center mb-8">
@@ -382,17 +382,20 @@ export default function App() {
           ) : (
               <div className="space-y-4">
                   {routes.map(r => (
-                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer">
-                          <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
-                          <div className="flex gap-4 text-sm text-slate-500 mt-2">
-                              <span><Package size={14} className="inline mr-1"/>{r.stops.length} pacotes</span>
-                              {r.optimized && <span className="text-green-600 font-bold"><Check size={14} className="inline mr-1"/>Otimizada</span>}
+                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer active:scale-98">
+                          <div className="flex justify-between items-start mb-2">
+                              <h3 className="font-bold text-lg text-slate-800 line-clamp-1">{safeStr(r.name)}</h3>
+                              <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{r.date}</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-slate-500">
+                              <span className="flex items-center gap-1"><Package size={14}/> {r.stops.length} vols</span>
+                              {r.optimized && <span className="flex items-center gap-1 text-green-600"><Check size={14}/> Otimizada</span>}
                           </div>
                       </div>
                   ))}
               </div>
           )}
-          <button onClick={() => setView('create')} className="fixed bottom-8 right-8 w-16 h-16 rounded-full fab-main flex items-center justify-center"><Plus size={32}/></button>
+          <button onClick={() => setView('create')} className="fixed bottom-8 right-8 w-16 h-16 rounded-full fab-main flex items-center justify-center active:scale-90 transition"><Plus size={32}/></button>
       </div>
   );
 
@@ -414,6 +417,12 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
+          {toast && (
+              <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+                  {toast.msg}
+              </div>
+          )}
+
           {showStartModal && (
               <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                   <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
@@ -454,11 +463,11 @@ export default function App() {
               
               {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-highlight animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
-                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-gradient-green shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
+                          <button onClick={() => openNav(nextGroup.lat, nextGroup.lng)} disabled={!activeRoute.optimized} className={`flex-[1.5] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${activeRoute.optimized ? 'btn-highlight shadow-lg' : 'bg-slate-100 text-slate-300'}`}>
                               <Navigation size={18}/> Navegar
                           </button>
                       )}
