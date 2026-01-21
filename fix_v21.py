@@ -6,7 +6,7 @@ import subprocess
 # --- CONFIGURAÇÕES ---
 BACKUP_DIR = "backup"
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v20_{TIMESTAMP}")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v21_{TIMESTAMP}")
 
 # CHAVE API
 API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
@@ -25,7 +25,7 @@ import * as XLSX from 'xlsx';
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v58_pure_google';
+const DB_KEY = 'mp_db_v59_step_select';
 const GOOGLE_KEY = "__API_KEY__";
 
 // --- HELPERS ---
@@ -104,90 +104,115 @@ const calculateTotalMetrics = (stops) => {
     };
 };
 
-// --- ALGORITMO 100% GOOGLE STEP-BY-STEP (V20) ---
-const optimizePureGoogle = async (allLocations, startPos, updateProgress) => {
+// --- ALGORITMO V21: GOOGLE STEP-SELECT ---
+const optimizeStepSelect = async (allLocations, startPos, updateProgress) => {
     let unvisited = [...allLocations];
     let finalChain = [];
     let currentOrigin = startPos;
     const service = new window.google.maps.DirectionsService();
+    const totalStops = allLocations.length;
 
     // Loop até acabar todas as paradas
     while (unvisited.length > 0) {
         
-        // Se só sobrou 1, adiciona e acaba
-        if (unvisited.length === 1) {
-            finalChain.push(unvisited[0]);
-            break;
-        }
-
-        // PASSO 1: PRÉ-SELEÇÃO GEOGRÁFICA
-        // Pegamos os 10 vizinhos mais próximos em linha reta para serem os "Candidatos".
+        // 1. ORDENAÇÃO GEOMÉTRICA (Para encontrar os candidatos)
         unvisited.sort((a, b) => {
             const dA = Math.pow(a.lat - currentOrigin.lat, 2) + Math.pow(a.lng - currentOrigin.lng, 2);
             const dB = Math.pow(b.lat - currentOrigin.lat, 2) + Math.pow(b.lng - currentOrigin.lng, 2);
             return dA - dB;
         });
 
-        const candidates = unvisited.slice(0, 10);
+        // 2. LÓGICA DA PARADA 1 (Regra: Mais próximo em linha reta)
+        if (finalChain.length === 0) {
+            const firstStop = unvisited[0]; // O mais próximo geométrico
+            finalChain.push(firstStop);
+            currentOrigin = firstStop;
+            unvisited.shift(); // Remove o primeiro
+            if (updateProgress) updateProgress(1, totalStops);
+            continue; // Vai para a próxima iteração
+        }
+
+        // 3. LÓGICA DA PARADA 2+ (Regra: Lote de 20 para o Google)
         
-        // PASSO 2: PERGUNTA PRO GOOGLE
-        // Definimos o último candidato (o mais longe dos 10) como 'Destination' técnico
-        // e os outros 9 como 'Waypoints' intermediários.
+        // Se sobrou só 1, não precisa de Google
+        if (unvisited.length === 1) {
+            finalChain.push(unvisited[0]);
+            break;
+        }
+
+        // Seleciona o lote de 20 candidatos (ou menos se estiver acabando)
+        const candidates = unvisited.slice(0, 20);
+        
+        // O destino técnico da rota é o último candidato (o mais longe do lote)
         const dest = candidates[candidates.length - 1]; 
+        // Os outros 19 (ou menos) são waypoints
         const waypointsList = candidates.slice(0, -1);
         const waypoints = waypointsList.map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
 
         try {
-            const res = await new Promise((resolve, reject) => {
-                service.route({
-                    origin: currentOrigin,
-                    destination: dest, 
-                    waypoints: waypoints, 
-                    optimizeWaypoints: true, 
-                    travelMode: 'DRIVING'
-                }, (result, status) => {
-                    if (status === 'OK') resolve(result);
-                    else reject(status);
+            // Se não houver waypoints (ex: só tem 2 candidatos), rota direta
+            if (waypoints.length === 0) {
+                // Só tem o dest (que é o 2º candidato). O 1º candidato geometricamente é o dest.
+                // Mas vamos mandar pro google validar o tempo
+                const res = await new Promise((resolve, reject) => {
+                    service.route({
+                        origin: currentOrigin,
+                        destination: dest,
+                        travelMode: 'DRIVING'
+                    }, (result, status) => {
+                        if (status === 'OK') resolve(result);
+                        else reject(status);
+                    });
                 });
-            });
+                // Nesse caso só tem 1 opção (o dest)
+                finalChain.push(dest);
+                currentOrigin = dest;
+                unvisited = unvisited.filter(p => p.id !== dest.id);
+            } 
+            else {
+                // Rota com Waypoints para otimizar
+                const res = await new Promise((resolve, reject) => {
+                    service.route({
+                        origin: currentOrigin,
+                        destination: dest, 
+                        waypoints: waypoints, 
+                        optimizeWaypoints: true, // Google, qual é o melhor?
+                        travelMode: 'DRIVING'
+                    }, (result, status) => {
+                        if (status === 'OK') resolve(result);
+                        else reject(status);
+                    });
+                });
 
-            // PASSO 3: A ESCOLHA DO VENCEDOR
-            // O Google retornou a ordem otimizada dos waypoints.
-            // Pegamos o PRIMEIRO ponto dessa ordem como o próximo passo ideal.
-            const order = res.routes[0].waypoint_order;
-            
-            let winner = null;
-            
-            if (order && order.length > 0) {
-                // order[0] é o índice no array 'waypointsList'
-                const winnerIndex = order[0];
-                winner = waypointsList[winnerIndex];
-            } else {
-                // Se a rota for direta ou algo der errado, pegamos o primeiro da lista
-                winner = waypointsList[0];
+                // A ESCOLHA: Pegar o topo da lista
+                const order = res.routes[0].waypoint_order;
+                let winner = null;
+
+                if (order && order.length > 0) {
+                    // O Google diz: "O waypoint no índice X é o primeiro a ser visitado"
+                    const winnerIndex = order[0];
+                    winner = waypointsList[winnerIndex];
+                } else {
+                    // Se o Google achar que o 'dest' (o mais longe) é o primeiro (muito raro, mas possível em retornos),
+                    // ou se a ordem vier vazia (rota linear), pegamos o primeiro da lista geométrica.
+                    // Na prática, waypointsList[0] é o melhor candidato se o google não opinar.
+                    winner = waypointsList[0];
+                }
+
+                // Adiciona VENCEDOR e ignora o resto
+                finalChain.push(winner);
+                currentOrigin = winner;
+                unvisited = unvisited.filter(p => p.id !== winner.id);
             }
 
-            // Se por acaso a lista de waypoints estava vazia (só tinha origem e dest), o winner é o dest
-            if (!winner) winner = dest;
-
-            // Adiciona na rota final
-            finalChain.push(winner);
-
-            // PASSO 4: ATUALIZAÇÃO
-            // O vencedor vira a nova origem
-            currentOrigin = winner;
+            // Feedback visual
+            if (updateProgress) updateProgress(finalChain.length, totalStops);
             
-            // Remove o vencedor da lista de não visitados
-            unvisited = unvisited.filter(p => p.id !== winner.id);
-
-            // Feedback visual no botão
-            if (updateProgress) updateProgress(finalChain.length, allLocations.length);
-            
-            // Delay anti-ban do Google
+            // Delay API
             await new Promise(r => setTimeout(r, 450)); 
 
         } catch (e) {
-            console.warn("Google API Fail, fallback nearest", e);
+            console.warn("Google API Fail, fallback", e);
             // Fallback: pega o mais próximo matemático
             const fallback = candidates[0];
             finalChain.push(fallback);
@@ -209,10 +234,7 @@ export default function App() {
   const [userPos, setUserPos] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [isOptimizing, setIsOptimizing] = useState(false);
-  
-  // Estado de progresso da otimização
   const [optimizeProgress, setOptimizeProgress] = useState(null);
-
   const [toast, setToast] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
@@ -325,7 +347,6 @@ export default function App() {
       if (stopIndex !== -1) {
           updatedRoutes[rIdx].stops[stopIndex].address = newAddress;
           setRoutes(updatedRoutes);
-          
           try {
               const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(newAddress)}&key=${GOOGLE_KEY}`);
               const data = await response.json();
@@ -338,9 +359,7 @@ export default function App() {
               } else {
                   showToast("Texto atualizado (Mapa não achou)", "info");
               }
-          } catch(e) {
-              console.error(e);
-          }
+          } catch(e) { console.error(e); }
       }
   };
 
@@ -383,14 +402,13 @@ export default function App() {
       const done = currentRoute.stops.filter(s => s.status !== 'pending');
       
       const groups = groupStopsByStopName(pending);
-      // Extrai apenas 1 representativo de cada grupo para mandar pro Google
       const locations = groups.map(g => ({ ...g.items[0] })); 
       
       try {
           setOptimizeProgress("0%");
-          // NOVA OTIMIZAÇÃO: PURE GOOGLE STEP-BY-STEP
-          const optimizedLocs = await optimizePureGoogle(locations, pos, (current, total) => {
-              setOptimizeProgress(`${Math.round(((current + 1) / total) * 100)}%`);
+          // NOVA OTIMIZAÇÃO: STEP-SELECT (Passo a Passo Seletivo)
+          const optimizedLocs = await optimizeStepSelect(locations, pos, (current, total) => {
+              setOptimizeProgress(`${Math.round((current / total) * 100)}%`);
           });
           
           const flatOptimized = [];
@@ -402,7 +420,7 @@ export default function App() {
           const updated = [...routes];
           updated[rIdx] = { ...updated[rIdx], stops: [...done, ...flatOptimized], optimized: true };
           setRoutes(updated);
-          showToast("Otimização Google 100% Concluída!");
+          showToast("Otimização Passo-a-Passo Concluída!");
       } catch(e) { alert("Erro: " + e); }
       setIsOptimizing(false);
       setOptimizeProgress(null);
@@ -630,12 +648,12 @@ def write_files():
         print(f"Escrevendo {path}")
 
 def main():
-    print(f"--- Iniciando V20 (100% Google Step-by-Step) {TIMESTAMP} ---")
+    print(f"--- Iniciando V21 (Step-Select Fix) {TIMESTAMP} ---")
     write_files()
     
     print("--- Git Push ---")
     subprocess.run("git add .", shell=True)
-    subprocess.run(f'git commit -m "Update V20: Otimização Pure Google Step-by-Step - {TIMESTAMP}"', shell=True)
+    subprocess.run(f'git commit -m "Update V21: Google Step-Select Logic - {TIMESTAMP}"', shell=True)
     subprocess.run("git push", shell=True)
     
     os.remove(__file__)
