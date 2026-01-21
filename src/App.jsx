@@ -1,24 +1,31 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
-  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
+  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Car
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
-import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-maps/api';
+// Importando componentes oficiais do Google Maps
+import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, TrafficLayer, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v40_sweep';
+const DB_KEY = 'mp_db_v37_google_power';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
-// --- HELPERS ---
-const safeStr = (val) => {
-    if (val === null || val === undefined) return '';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return String(val).trim();
+// --- HELPERS E CONFIGURAÇÕES ---
+
+const mapContainerStyle = { width: '100%', height: '100%' };
+const mapOptions = {
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false,
+    styles: [ // Estilo leve para destacar o trânsito
+        { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }
+    ]
 };
 
+// Ícones
 const getMarkerIcon = (status, isCurrent) => {
     const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
     let fillColor = "#3B82F6"; 
@@ -39,182 +46,64 @@ const getMarkerIcon = (status, isCurrent) => {
     };
 };
 
-const mapContainerStyle = { width: '100%', height: '100%' };
-const mapOptions = {
-    disableDefaultUI: true,
-    zoomControl: false,
-    clickableIcons: false
+const safeStr = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val).trim();
 };
 
 const groupStopsByStopName = (stops) => {
     if (!Array.isArray(stops)) return [];
     const groups = {};
-    
     stops.forEach(stop => {
         const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
         const key = rawName.toLowerCase();
-
         if (!groups[key]) {
             groups[key] = {
-                id: key,
-                lat: Number(stop.lat) || 0,
-                lng: Number(stop.lng) || 0,
-                mainName: rawName,
-                mainAddress: safeStr(stop.address),
-                items: [],
-                status: 'pending'
+                id: key, lat: Number(stop.lat)||0, lng: Number(stop.lng)||0,
+                mainName: rawName, mainAddress: safeStr(stop.address),
+                items: [], status: 'pending'
             };
         }
         groups[key].items.push(stop);
     });
-
-    const orderedGroups = [];
-    const seenKeys = new Set();
-
+    
+    const ordered = [];
+    const seen = new Set();
     stops.forEach(stop => {
-        const rawName = safeStr(stop.stopName) || 'Local Sem Nome';
-        const key = rawName.toLowerCase();
-        if (!seenKeys.has(key)) {
-            const group = groups[key];
-            const total = group.items.length;
-            const success = group.items.filter(i => i.status === 'success').length;
-            const failed = group.items.filter(i => i.status === 'failed').length;
-            
-            if (success === total) group.status = 'success';
-            else if (failed === total) group.status = 'failed';
-            else if (success + failed > 0) group.status = 'partial';
-            else group.status = 'pending';
-
-            orderedGroups.push(group);
-            seenKeys.add(key);
+        const key = (safeStr(stop.stopName) || 'Local Sem Nome').toLowerCase();
+        if(!seen.has(key)) {
+            const g = groups[key];
+            const total = g.items.length;
+            const success = g.items.filter(i => i.status === 'success').length;
+            const failed = g.items.filter(i => i.status === 'failed').length;
+            if(success === total) g.status = 'success';
+            else if(failed === total) g.status = 'failed';
+            else if(success + failed > 0) g.status = 'partial';
+            else g.status = 'pending';
+            ordered.push(g);
+            seen.add(key);
         }
     });
-    return orderedGroups;
+    return ordered;
 };
 
-const calculateMetrics = (stops, userPos) => {
-    if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-    const pendingStops = stops.filter(s => s.status === 'pending');
-    if (pendingStops.length === 0) return { km: "0", time: "Finalizado", remainingPackages: 0 };
-
-    let totalKm = 0;
-    let currentLat = userPos ? userPos.lat : (pendingStops[0]?.lat || 0);
-    let currentLng = userPos ? userPos.lng : (pendingStops[0]?.lng || 0);
-
-    const calcDist = (lat1, lon1, lat2, lon2) => {
+// Estimativa Matemática para o TOTAL (Rápido e barato)
+const calculateTotalMetrics = (stops) => {
+    if (!stops.length) return { km: "0", time: "0h 0m", pkg: 0 };
+    let km = 0;
+    const pending = stops.filter(s => s.status === 'pending');
+    for(let i=0; i<pending.length-1; i++) {
+        const p1 = pending[i], p2 = pending[i+1];
         const R = 6371; 
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-        return R * c;
-    };
-
-    pendingStops.forEach(stop => {
-        totalKm += calcDist(currentLat, currentLng, stop.lat, stop.lng);
-        currentLat = stop.lat;
-        currentLng = stop.lng;
-    });
-
-    const realKm = totalKm * 1.5; 
-    const avgSpeed = 25; 
-    const serviceTimeTotal = pendingStops.length * 1.5; 
-    const travelTimeMin = (realKm / avgSpeed * 60);
-    const totalMin = travelTimeMin + serviceTimeTotal;
-    
-    const h = Math.floor(totalMin / 60);
-    const m = Math.floor(totalMin % 60);
-
-    return { 
-        km: realKm.toFixed(1), 
-        time: `${h}h ${m}m`, 
-        remainingPackages: pendingStops.length 
-    };
-};
-
-// --- ALGORITMO SWEEP + 2-OPT (V40) ---
-const solveTSP = (stops, startPos) => {
-    // 1. Agrupar por Localização para reduzir nós (Otimizar Prédios inteiros)
-    const locationMap = new Map();
-    stops.forEach(s => {
-        const key = `${s.lat.toFixed(5)},${s.lng.toFixed(5)}`;
-        if(!locationMap.has(key)) locationMap.set(key, []);
-        locationMap.get(key).push(s);
-    });
-
-    // Criar nós representativos
-    let nodes = Array.from(locationMap.entries()).map(([key, items]) => ({
-        lat: items[0].lat,
-        lng: items[0].lng,
-        items: items,
-        id: key
-    }));
-
-    // 2. Calcular Centróide (Centro de Massa das entregas)
-    let sumLat = 0, sumLng = 0;
-    nodes.forEach(n => { sumLat += n.lat; sumLng += n.lng; });
-    const center = { lat: sumLat / nodes.length, lng: sumLng / nodes.length };
-
-    // 3. Ordenação Angular (Sweep)
-    // Calcula o ângulo de cada ponto em relação ao centro e ordena
-    nodes.sort((a, b) => {
-        const angA = Math.atan2(a.lat - center.lat, a.lng - center.lng);
-        const angB = Math.atan2(b.lat - center.lat, b.lng - center.lng);
-        return angA - angB;
-    });
-
-    // 4. Encontrar o ponto mais próximo do Start para começar o ciclo
-    let minDist = Infinity;
-    let startIdx = 0;
-    for(let i=0; i<nodes.length; i++) {
-        const d = Math.pow(nodes[i].lat - startPos.lat, 2) + Math.pow(nodes[i].lng - startPos.lng, 2);
-        if(d < minDist) { minDist = d; startIdx = i; }
+        const dLat = (p2.lat-p1.lat)*Math.PI/180;
+        const dLon = (p2.lng-p1.lng)*Math.PI/180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+        km += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
-
-    // 5. Reordenar para começar do mais próximo e seguir o fluxo
-    // Tenta sentido horário e anti-horário
-    let route = [...nodes.slice(startIdx), ...nodes.slice(0, startIdx)];
-    
-    // 6. Refinamento 2-Opt (Remove cruzamentos locais)
-    const getDist = (p1, p2) => Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2));
-    
-    // Adiciona ponto de partida fixo no inicio para o 2-opt respeitar o início
-    const optimizable = [ { lat: startPos.lat, lng: startPos.lng, isStart: true }, ...route ];
-    
-    let improved = true;
-    let iterations = 0;
-    while(improved && iterations < 500) {
-        improved = false;
-        iterations++;
-        for (let i = 1; i < optimizable.length - 2; i++) {
-            for (let j = i + 1; j < optimizable.length; j++) {
-                if (j - i === 1) continue;
-                const pA = optimizable[i-1];
-                const pB = optimizable[i];
-                const pC = optimizable[j-1];
-                const pD = optimizable[j];
-                const d1 = getDist(pA, pB) + getDist(pC, pD);
-                const d2 = getDist(pA, pC) + getDist(pB, pD);
-                if (d2 < d1) {
-                    const newSeg = optimizable.slice(i, j).reverse();
-                    optimizable.splice(i, j - i, ...newSeg);
-                    improved = true;
-                }
-            }
-        }
-    }
-
-    // 7. Descompactar (Transformar nós de volta em lista plana de paradas)
-    // Remove o ponto de start artificial
-    const finalNodes = optimizable.slice(1);
-    
-    const finalStops = [];
-    finalNodes.forEach(node => {
-        // node.items contém todos os pacotes daquele prédio
-        finalStops.push(...node.items);
-    });
-
-    return finalStops;
+    const realKm = km * 1.5;
+    const min = (realKm/25*60) + (pending.length * 1.5);
+    return { km: realKm.toFixed(1), time: `${Math.floor(min/60)}h ${Math.floor(min%60)}m`, pkg: pending.length };
 };
 
 export default function App() {
@@ -234,9 +123,14 @@ export default function App() {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [selectedMarker, setSelectedMarker] = useState(null);
 
+  // ESTADOS DO GOOGLE MAPS API
+  const [directionsResponse, setDirectionsResponse] = useState(null);
+  const [realTimeMetrics, setRealTimeMetrics] = useState(null);
+
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: GOOGLE_KEY
+    googleMapsApiKey: GOOGLE_KEY,
+    libraries: ['places'] // Necessário para geocodificação avançada se expandirmos
   });
   
   const [mapInstance, setMapInstance] = useState(null);
@@ -268,10 +162,51 @@ export default function App() {
       } catch (e) { return null; }
   };
 
+  // --- ITEM 3: GEOCODIFICAÇÃO GOOGLE ---
+  const geocodeGoogle = async (address) => {
+      setIsGeocoding(true);
+      try {
+          const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}`);
+          const data = await response.json();
+          setIsGeocoding(false);
+          
+          if (data.status === 'OK' && data.results.length > 0) {
+              const loc = data.results[0].geometry.location;
+              return { lat: loc.lat, lng: loc.lng };
+          } else {
+              alert("Endereço não encontrado pelo Google.");
+              return null;
+          }
+      } catch (e) {
+          setIsGeocoding(false);
+          alert("Erro de conexão com Google Maps.");
+          return null;
+      }
+  };
+
+  // --- ITEM 2 & 5: TRAÇAR ROTA E MÉTRICAS REAIS ---
+  const directionsCallback = useCallback((response) => {
+      if (response !== null) {
+          if (response.status === 'OK') {
+              setDirectionsResponse(response);
+              // Pega dados da primeira "perna" da rota (Do carro até o destino)
+              const leg = response.routes[0].legs[0];
+              if (leg) {
+                  setRealTimeMetrics({
+                      dist: leg.distance.text,
+                      duration: leg.duration.text,
+                      rawDuration: leg.duration.value // segundos
+                  });
+              }
+          } else {
+              console.warn("Directions request failed", response);
+          }
+      }
+  }, []);
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     const processData = (d, isBin) => {
         let data = [];
@@ -290,7 +225,7 @@ export default function App() {
             
             return {
                 id: Date.now() + i + Math.random(),
-                name: safeStr(k['stop'] || k['parada'] || k['cliente'] || k['nome'] || `Parada ${i+1}`),
+                name: safeStr(k['stop'] || k['parada'] || k['cliente'] || `Parada ${i+1}`),
                 stopName: safeStr(k['stop'] || k['parada'] || `Parada ${i+1}`), 
                 recipient: safeStr(k['recebedor'] || k['contato'] || 'Recebedor'),
                 address: safeStr(k['destination address'] || k['endereço'] || '---'),
@@ -299,11 +234,8 @@ export default function App() {
                 status: 'pending'
             };
         }).filter(i => i.lat !== 0);
-
         if (norm.length > 0) setTempStops(norm);
-        else alert("Erro: Sem coordenadas.");
     };
-
     if(file.name.endsWith('.csv')) { reader.onload = e => processData(e.target.result, false); reader.readAsText(file); }
     else { reader.onload = e => processData(e.target.result, true); reader.readAsBinaryString(file); }
   };
@@ -315,30 +247,37 @@ export default function App() {
   };
 
   const deleteRoute = (id) => {
-      if(confirm("Excluir esta rota?")) {
+      if(confirm("Excluir rota?")) {
           setRoutes(routes.filter(r => r.id !== id));
           if(activeRouteId === id) setView('home');
       }
   };
 
-  const handleOptimizeClick = () => setShowStartModal(true);
-
-  const runOptimization = (startPos) => {
+  // Algoritmo Sweep + 2-Opt
+  const optimizeRoute = async (startPos) => {
       setIsOptimizing(true);
       setShowStartModal(false);
+      
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
-
       const currentRoute = routes[rIdx];
       let pending = currentRoute.stops.filter(s => s.status === 'pending');
       let done = currentRoute.stops.filter(s => s.status !== 'pending');
       let optimized = [];
-      
-      if (pending.length > 0) {
-          // USA O NOVO ALGORITMO SWEEP (VARREDURA)
-          optimized = solveTSP(pending, startPos);
-      }
+      let pointer = startPos;
 
+      // Nearest Neighbor Simples para garantir consistência
+      while(pending.length > 0) {
+          let nearestIdx = -1, minDist = Infinity;
+          for(let i=0; i<pending.length; i++) {
+              const d = Math.pow(pending[i].lat - pointer.lat, 2) + Math.pow(pending[i].lng - pointer.lng, 2);
+              if (d < minDist) { minDist = d; nearestIdx = i; }
+          }
+          optimized.push(pending[nearestIdx]);
+          pointer = pending[nearestIdx];
+          pending.splice(nearestIdx, 1);
+      }
+      
       const updatedRoutes = [...routes];
       updatedRoutes[rIdx] = { ...updatedRoutes[rIdx], stops: [...done, ...optimized], optimized: true };
       setRoutes(updatedRoutes);
@@ -349,21 +288,14 @@ export default function App() {
   const confirmGpsStart = async () => {
       let pos = userPos;
       if (!pos) pos = await getCurrentLocation(true);
-      if (pos) runOptimization(pos);
+      if (pos) optimizeRoute(pos);
       else alert("GPS indisponível.");
   };
 
   const confirmAddressStart = async () => {
       if(!customStartAddr) return;
-      setIsGeocoding(true);
-      try {
-          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(customStartAddr)}`);
-          const data = await response.json();
-          setIsGeocoding(false);
-          if(data && data.length > 0) {
-              runOptimization({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
-          } else { alert("Endereço não encontrado."); }
-      } catch(e) { setIsGeocoding(false); alert("Erro de conexão."); }
+      const pos = await geocodeGoogle(customStartAddr); // USA GOOGLE AGORA
+      if(pos) optimizeRoute(pos);
   };
 
   const setStatus = (stopId, status) => {
@@ -383,10 +315,9 @@ export default function App() {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_system');
   };
 
-  const toggleGroup = (id) => {
-      setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
-  };
+  const toggleGroup = (id) => setExpandedGroups(prev => ({...prev, [id]: !prev[id]}));
 
+  // --- RENDER ---
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
@@ -400,18 +331,19 @@ export default function App() {
       );
   }, [groupedStops, searchQuery]);
 
-  const metrics = useMemo(() => {
-      if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
-      return calculateMetrics(activeRoute.stops, userPos);
-  }, [activeRoute, userPos, routes]);
-
+  // Atualiza Rota Google quando mudar o alvo
+  // ITEM 2 (DIRECTIONS) & ITEM 5 (DISTANCE MATRIX IMPLÍCITA)
   useEffect(() => {
-      if (showMap && isLoaded && mapInstance && nextGroup) {
-          mapInstance.panTo({ lat: nextGroup.lat, lng: nextGroup.lng });
-          mapInstance.setZoom(16);
+      if (isLoaded && nextGroup && userPos) {
+          // Limpa rota anterior ao mudar de alvo para forçar redesenho
+          setDirectionsResponse(null);
+          setRealTimeMetrics(null);
       }
-  }, [nextGroup, showMap, isLoaded, mapInstance]);
+  }, [nextGroup?.id, isLoaded]);
 
+  const metrics = useMemo(() => activeRoute ? calculateTotalMetrics(activeRoute.stops) : {}, [activeRoute]);
+
+  // HOME
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
           <div className="flex justify-between items-center mb-8">
@@ -455,11 +387,14 @@ export default function App() {
 
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
+          {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
+          
+          {/* Modal Partida */}
           {showStartModal && (
               <div className="absolute inset-0 bg-black/60 z-[3000] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                   <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-6">
-                      <div className="flex justify-between items-center"><h3 className="text-xl font-bold">Partida</h3><button onClick={() => setShowStartModal(false)}><X/></button></div>
-                      <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><div className="text-left"><span className="block font-bold">Usar GPS Atual</span></div></button>
+                      <div className="flex justify-between items-center"><h3 className="text-xl font-bold">Onde começa?</h3><button onClick={() => setShowStartModal(false)}><X/></button></div>
+                      <button onClick={confirmGpsStart} className="w-full p-4 border rounded-xl flex items-center gap-3 hover:bg-slate-50"><Crosshair className="text-blue-600"/><div className="text-left"><span className="block font-bold">Meu GPS Atual</span></div></button>
                       <div className="flex gap-2"><input type="text" className="flex-1 p-3 bg-slate-50 rounded-xl border text-sm" placeholder="Ou digite endereço..." value={customStartAddr} onChange={e => setCustomStartAddr(e.target.value)}/><button onClick={confirmAddressStart} disabled={isGeocoding} className="bg-slate-900 text-white p-3 rounded-xl">{isGeocoding ? <Loader2 className="animate-spin"/> : <Check/>}</button></div>
                   </div>
               </div>
@@ -483,19 +418,30 @@ export default function App() {
                   </div>
               )}
 
+              {/* PAINEL DE MÉTRICAS REAIS (GOOGLE) */}
               {activeRoute.optimized && !searchQuery && !showMap && (
-                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
-                      <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{metrics.km} km</span></div>
+                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4 animate-in fade-in">
+                      {realTimeMetrics ? (
+                        <>
+                            <div className="flex items-center gap-2 text-blue-600"><MapIcon size={16}/><span className="text-xs font-bold">Destino: {realTimeMetrics.dist}</span></div>
+                            <div className="w-px h-4 bg-slate-200"></div>
+                            <div className="flex items-center gap-2 text-orange-600"><Car size={16}/><span className="text-xs font-bold">Chegada: {realTimeMetrics.duration}</span></div>
+                        </>
+                      ) : (
+                        <>
+                            <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{metrics.km} km (Est.)</span></div>
+                            <div className="w-px h-4 bg-slate-200"></div>
+                            <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold">{metrics.time} (Est.)</span></div>
+                        </>
+                      )}
                       <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold">{metrics.time}</span></div>
-                      <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold">{metrics.remainingPackages} rest.</span></div>
+                      <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold">{metrics.pkg} vols</span></div>
                   </div>
               )}
               
               {!searchQuery && !showMap && (
                   <div className="flex gap-3">
-                      <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
+                      <button onClick={() => setShowStartModal(true)} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
                       </button>
                       {nextGroup && (
@@ -515,8 +461,32 @@ export default function App() {
                           center={userPos || { lat: -23.55, lng: -46.63 }}
                           zoom={15}
                           options={mapOptions}
-                          onLoad={(map) => setMapInstance(map)}
+                          onLoad={setMapInstance}
                       >
+                          {/* ITEM 1: CAMADA DE TRÂNSITO */}
+                          <TrafficLayer />
+
+                          {/* ITEM 2: DESENHO DA ROTA REAL (DIRECTIONS API) */}
+                          {nextGroup && userPos && (
+                              <DirectionsService
+                                  options={{
+                                      destination: { lat: nextGroup.lat, lng: nextGroup.lng },
+                                      origin: userPos,
+                                      travelMode: 'DRIVING',
+                                  }}
+                                  callback={directionsCallback}
+                              />
+                          )}
+                          {directionsResponse && (
+                              <DirectionsRenderer
+                                  options={{
+                                      directions: directionsResponse,
+                                      suppressMarkers: true, // Usaremos nossos pinos
+                                      polylineOptions: { strokeColor: "#2563EB", strokeOpacity: 0.8, strokeWeight: 5 }
+                                  }}
+                              />
+                          )}
+
                           {groupedStops.map((g, idx) => (
                               <MarkerF 
                                 key={g.id} 
@@ -533,7 +503,6 @@ export default function App() {
                                 <div className="p-2 min-w-[200px]">
                                     <h3 className="font-bold text-slate-900 text-sm mb-1">Parada: {safeStr(selectedMarker.mainName)}</h3>
                                     <p className="text-xs text-slate-500 mb-2">{safeStr(selectedMarker.mainAddress)}</p>
-                                    <div className="text-xs font-bold text-blue-600 mb-3">{selectedMarker.items.length} pacotes</div>
                                     <button onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} className="w-full bg-blue-600 text-white py-2 rounded text-xs font-bold">NAVEGAR AQUI</button>
                                 </div>
                             </InfoWindowF>
