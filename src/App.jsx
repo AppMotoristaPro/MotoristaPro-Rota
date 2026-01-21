@@ -9,7 +9,7 @@ import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, DirectionsService, Dir
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'mp_db_v46_mapfix';
+const DB_KEY = 'mp_db_v47_map_instance_fix';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
 // --- HELPERS VISUAIS ---
@@ -48,7 +48,6 @@ const getUserIcon = (heading) => {
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 
-// DEFINIÇÃO CORRETA DAS OPÇÕES DO MAPA
 const defaultMapOptions = {
     disableDefaultUI: true,
     zoomControl: false,
@@ -101,7 +100,6 @@ const groupStopsByStopName = (stops) => {
     return ordered;
 };
 
-// Algoritmo de Otimização em Cadeia (Rolling Chain)
 const optimizeRollingChain = async (allStops, startPos) => {
     let unvisited = [...allStops];
     let finalRoute = [];
@@ -109,7 +107,6 @@ const optimizeRollingChain = async (allStops, startPos) => {
     const service = new window.google.maps.DirectionsService();
 
     while (unvisited.length > 0) {
-        // Encontra os 23 mais próximos
         unvisited.sort((a, b) => {
             const dA = Math.pow(a.lat - currentPos.lat, 2) + Math.pow(a.lng - currentPos.lng, 2);
             const dB = Math.pow(b.lat - currentPos.lat, 2) + Math.pow(b.lng - currentPos.lng, 2);
@@ -172,6 +169,9 @@ export default function App() {
   const [selectedMarker, setSelectedMarker] = useState(null);
 
   const [directionsResponse, setDirectionsResponse] = useState(null);
+  
+  // CORREÇÃO AQUI: Adicionando o estado que faltava
+  const [mapInstance, setMapInstance] = useState(null);
   const mapRef = useRef(null);
 
   const { isLoaded } = useJsApiLoader({
@@ -349,7 +349,7 @@ export default function App() {
       );
   }, [groupedStops, searchQuery]);
 
-  // DIRECTIONS SERVICE (Desenho da Rota)
+  // DIRECTIONS SERVICE
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -365,15 +365,14 @@ export default function App() {
       }
   }, [nextGroup?.id, userPos?.lat, userPos?.lng, isLoaded]);
 
-  // FOLLOW ME (Giro do Mapa)
+  // FOLLOW ME
   useEffect(() => {
-      if (isLoaded && mapRef.current && userPos && isNavigating) {
-          mapRef.current.panTo(userPos);
-          mapRef.current.setZoom(18);
-          mapRef.current.setHeading(userHeading);
-          mapRef.current.setTilt(45);
+      if (isLoaded && mapInstance && userPos && isNavigating) {
+          mapInstance.panTo(userPos);
+          mapInstance.setZoom(18);
+          // Nota: rotação do mapa não é trivial na API JS padrão, mantemos orientação norte por estabilidade
       }
-  }, [userPos, userHeading, isNavigating, isLoaded]);
+  }, [userPos, isNavigating, isLoaded, mapInstance]);
 
   // VIEWS
   if (view === 'home') return (
@@ -441,6 +440,14 @@ export default function App() {
               </div>
               
               {!showMap && (
+                  <div className="relative mb-4">
+                      <Search size={18} className="absolute left-3 top-3 text-slate-400"/>
+                      <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 text-sm outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}/>
+                      {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400"><X size={16}/></button>}
+                  </div>
+              )}
+              
+              {!searchQuery && !showMap && (
                   <div className="flex gap-3">
                       <button onClick={handleOptimizeClick} disabled={isOptimizing} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${!activeRoute.optimized ? 'btn-gradient-blue animate-pulse' : 'btn-secondary'}`}>
                           {isOptimizing ? <Loader2 className="animate-spin" size={18}/> : <Sliders size={18}/>} {isOptimizing ? '...' : 'Otimizar'}
@@ -461,7 +468,7 @@ export default function App() {
                           mapContainerStyle={mapContainerStyle}
                           center={userPos || { lat: -23.55, lng: -46.63 }}
                           zoom={16}
-                          options={{ ...defaultMapOptions, heading: userHeading, tilt: isNavigating ? 45 : 0 }}
+                          options={defaultMapOptions}
                           onLoad={(map) => { setMapInstance(map); mapRef.current = map; }}
                       >
                           {directionsResponse && <DirectionsRenderer directions={directionsResponse} options={{ suppressMarkers: true, polylineOptions: { strokeColor: "#2563EB", strokeWeight: 5 } }} />}
@@ -507,9 +514,9 @@ export default function App() {
               <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
                   {!searchQuery && nextGroup && activeRoute.optimized && (
                       <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
-                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
-                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">{safeStr(nextGroup.mainName)}</h3>
-                          <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes</p>
+                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">EM ANDAMENTO</div>
+                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {safeStr(nextGroup.mainName)}</h3>
+                          <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
                           <div className="space-y-3 border-t border-slate-100 pt-3">
                               {nextGroup.items.map((item, idx) => {
                                   if (item.status !== 'pending') return null;
@@ -536,10 +543,10 @@ export default function App() {
                       const statusClass = `border-l-status-${group.status}`;
                       return (
                           <div key={group.id} className={`modern-card overflow-hidden ${statusClass} ${group.status !== 'pending' && !searchQuery ? 'opacity-60 grayscale' : ''}`}>
-                              <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
+                              <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition-colors">
                                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : (idx + 1)}</div>
                                   <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">{safeStr(group.mainName)}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div>
+                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {safeStr(group.mainName)}</h4>{hasMulti && <span className="bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">{group.items.length}</span>}</div>
                                       <p className="text-xs text-slate-400 truncate">{group.mainAddress}</p>
                                   </div>
                                   {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 rounded-full"><Check size={18}/></button>)}
