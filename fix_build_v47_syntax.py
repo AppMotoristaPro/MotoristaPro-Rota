@@ -1,4 +1,15 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import os
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+APP_NAME = "MotoristaPro-Rota"
+GOOGLE_MAPS_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+files_content = {}
+
+# 1. APP.JSX (Sintaxe JSX Corrigida e Validada)
+# Usando estrutura mais segura para evitar erros de renderização
+files_content['src/App.jsx'] = r'''import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
@@ -10,7 +21,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'mp_db_v47_syntax_fix';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__GOOGLE_KEY__";
 
 // --- HELPERS ---
 const safeStr = (val) => {
@@ -576,4 +587,90 @@ export default function App() {
           )}
       </div>
   );
-}
+}'''
+
+# 2. WORKFLOW (Garantindo limpeza da plataforma Android para evitar conflitos)
+files_content['.github/workflows/build.yml'] = r'''name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install Dependencies
+        run: npm install
+        
+      - name: Build Web Assets
+        run: npm run build
+        
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      # REMOVE PLATAFORMA ANTIGA SE EXISTIR
+      - name: Clean Android Platform
+        run: rm -rf android
+        
+      - name: Add Android Platform
+        run: npx cap add android
+      
+      # INJETAR PERMISSÕES NO ANDROID MANIFEST
+      - name: Inject Android Permissions
+        run: |
+          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" \/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" \/><uses-feature android:name="android.hardware.location.gps" \/><\/manifest>/' android/app/src/main/AndroidManifest.xml
+          cat android/app/src/main/AndroidManifest.xml
+        
+      - name: Sync Capacitor
+        run: npx cap sync
+        
+      - name: Build APK (Debug)
+        working-directory: android
+        run: ./gradlew assembleDebug
+        
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotoristaPro-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+'''
+
+def main():
+    print(f"🚀 ATUALIZAÇÃO V47 (SYNTAX & BUILD FIX) - {APP_NAME}")
+    
+    # 1. Substituir a chave no código
+    final_app_jsx = files_content['src/App.jsx'].replace("__GOOGLE_KEY__", GOOGLE_MAPS_KEY)
+    
+    print("\n📝 Atualizando App.jsx com Google Maps API...")
+    with open("src/App.jsx", 'w', encoding='utf-8') as f:
+        f.write(final_app_jsx)
+        
+    print("\n📝 Atualizando workflow de build...")
+    with open(".github/workflows/build.yml", 'w', encoding='utf-8') as f:
+        f.write(files_content['.github/workflows/build.yml'])
+        
+    print("\n☁️ Enviando para GitHub...")
+    subprocess.run("git add .", shell=True)
+    subprocess.run('git commit -m "fix: V47 Clean Build Logic and JSX Syntax"', shell=True)
+    subprocess.run("git push origin main", shell=True)
+    
+    try: os.remove(__file__)
+    except: pass
+
+if __name__ == "__main__":
+    main()
+
+
