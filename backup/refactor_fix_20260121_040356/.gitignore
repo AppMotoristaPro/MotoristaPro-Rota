@@ -5,5 +5,3 @@ dist-ssr
 .DS_Store
 android/
 ios/
-.env
-.env.local

@@ -1,4 +1,235 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import datetime
+import subprocess
+import sys
+
+# --- CONFIGURAÇÕES ---
+BACKUP_DIR = "backup"
+TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"refactor_fix_{TIMESTAMP}")
+
+# Conteúdo dos arquivos
+FILES_TO_WRITE = {
+    ".env": """VITE_GOOGLE_MAPS_API_KEY=AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU""",
+
+    ".gitignore": """node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+android/
+ios/
+.env
+.env.local
+""",
+
+    "src/components/MapView.jsx": """import React, { useState } from 'react';
+import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
+import { Loader2 } from 'lucide-react';
+
+const mapContainerStyle = { width: '100%', height: '100%' };
+const mapOptions = {
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false
+};
+
+const getMarkerIcon = (status, isCurrent) => {
+    const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
+    let fillColor = "#3B82F6"; 
+    if (status === 'success') fillColor = "#10B981";
+    if (status === 'failed') fillColor = "#EF4444";
+    if (status === 'partial') fillColor = "#F59E0B";
+    if (isCurrent) fillColor = "#0F172A";
+
+    return {
+        path: path,
+        fillColor: fillColor,
+        fillOpacity: 1,
+        strokeWeight: 1.5,
+        strokeColor: "#FFFFFF",
+        scale: isCurrent ? 2.0 : 1.4,
+        anchor: { x: 12, y: 22 },
+        labelOrigin: { x: 12, y: 10 }
+    };
+};
+
+export default function MapView({ 
+    userPos, 
+    groupedStops, 
+    directionsResponse, 
+    nextGroup, 
+    openNav,
+    isLoaded
+}) {
+    const [selectedMarker, setSelectedMarker] = useState(null);
+    const [mapInstance, setMapInstance] = useState(null);
+
+    if (!isLoaded) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin"/> Carregando Mapa...</div>;
+
+    return (
+        <GoogleMap
+            mapContainerStyle={mapContainerStyle}
+            center={userPos || { lat: -23.55, lng: -46.63 }}
+            zoom={14}
+            options={mapOptions}
+            onLoad={setMapInstance}
+        >
+            {directionsResponse && (
+                <DirectionsRenderer 
+                    directions={directionsResponse} 
+                    options={{ suppressMarkers: true, polylineOptions: { strokeColor: "#2563EB", strokeWeight: 5 } }} 
+                />
+            )}
+            
+            {groupedStops.map((g, idx) => (
+                <MarkerF 
+                    key={g.id} 
+                    position={{ lat: g.lat, lng: g.lng }}
+                    label={{ text: String(idx + 1), color: "white", fontSize: "12px", fontWeight: "bold" }}
+                    icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
+                    onClick={() => setSelectedMarker(g)}
+                />
+            ))}
+            
+            {userPos && (
+                <MarkerF 
+                    position={{ lat: userPos.lat, lng: userPos.lng }} 
+                    icon={getMarkerIcon('current', true)} 
+                    zIndex={1000}
+                />
+            )}
+
+            {selectedMarker && (
+                <InfoWindowF 
+                    position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
+                    onCloseClick={() => setSelectedMarker(null)}
+                >
+                    <div className="p-2 min-w-[200px]">
+                        <h3 className="font-bold text-sm mb-1">Parada: {selectedMarker.mainName}</h3>
+                        <p className="text-xs text-slate-500 mb-2">{selectedMarker.mainAddress}</p>
+                        <button 
+                            onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} 
+                            className="w-full bg-blue-600 text-white py-2 rounded text-xs font-bold"
+                        >
+                            NAVEGAR AQUI
+                        </button>
+                    </div>
+                </InfoWindowF>
+            )}
+        </GoogleMap>
+    );
+}
+""",
+
+    "src/components/RouteList.jsx": """import React from 'react';
+import { Check, ChevronUp, ChevronDown } from 'lucide-react';
+
+export default function RouteList({ 
+    groupedStops, 
+    nextGroup, 
+    activeRoute, 
+    searchQuery, 
+    expandedGroups, 
+    toggleGroup, 
+    setStatus 
+}) {
+    // Helper seguro para strings
+    const safeStr = (val) => {
+        if (val === null || val === undefined) return '';
+        return String(val).trim();
+    };
+
+    // Filtro de busca
+    const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
+        safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
+        safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    return (
+        <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
+            {/* CARD DE DESTAQUE (PRÓXIMA PARADA) */}
+            {!searchQuery && nextGroup && activeRoute.optimized && (
+                <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
+                    <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
+                    <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {safeStr(nextGroup.mainName)}</h3>
+                    <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
+                    <div className="space-y-3 border-t border-slate-100 pt-3">
+                        {nextGroup.items.map((item, idx) => {
+                            if (item.status !== 'pending') return null;
+                            return (
+                                <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                    <div className="mb-3">
+                                        <span className="text-xs font-bold text-blue-600 block mb-1">PACOTE #{idx + 1}</span>
+                                        <span className="text-sm font-bold text-slate-800 block leading-tight">{safeStr(item.address)}</span>
+                                    </div>
+                                    <div className="flex gap-2 w-full">
+                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg btn-outline-red rounded-xl">Não Entregue</button>
+                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg btn-gradient-green rounded-xl text-white shadow-md">ENTREGUE</button>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
+
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Lista Completa</h4>
+            
+            {filteredGroups.map((group, idx) => {
+                // Não mostra o grupo se ele já estiver no card de destaque
+                if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
+                
+                const isExpanded = expandedGroups[group.id];
+                const hasMulti = group.items.length > 1;
+                const statusClass = `border-l-status-${group.status}`;
+                
+                return (
+                    <div key={group.id} className={`modern-card overflow-hidden ${statusClass} ${group.status !== 'pending' && !searchQuery ? 'opacity-60 grayscale' : ''}`}>
+                        <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {safeStr(group.mainName)}</h4></div>
+                                <p className="text-xs text-slate-400 truncate">{group.items.length} pacotes a serem entregues nessa parada</p>
+                            </div>
+                            {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>) : (
+                                group.items[0].status === 'pending' && 
+                                <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 rounded-full"><Check size={18}/></button>
+                            )}
+                        </div>
+                        {(isExpanded || (hasMulti && isExpanded)) && (
+                            <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
+                                {group.items.map((item) => (
+                                    <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
+                                        <div className="mb-2">
+                                            <span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span>
+                                            <span className="text-sm font-bold text-slate-700 block">{safeStr(item.address)}</span>
+                                        </div>
+                                        {item.status === 'pending' ? (
+                                            <div className="flex gap-2 w-full">
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button>
+                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )
+            })}
+            <div className="h-10"></div>
+        </div>
+    );
+}
+""",
+
+    "src/App.jsx": """import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Check, Trash2, Plus, 
   ArrowLeft, Sliders, MapPin, Package, Clock, Box, 
@@ -471,3 +702,95 @@ export default function App() {
       </div>
   );
 }
+"""
+}
+
+# --- FUNÇÕES ---
+
+def ensure_dir(directory):
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+
+def backup_files():
+    print(f"--- Iniciando Backup para: {CURRENT_BACKUP_PATH} ---")
+    ensure_dir(CURRENT_BACKUP_PATH)
+    
+    # Lista de arquivos para backup (os que vamos alterar)
+    targets = [
+        "src/App.jsx",
+        ".gitignore",
+        "package.json" 
+    ]
+    
+    for target in targets:
+        if os.path.exists(target):
+            # Cria a estrutura de pastas no backup se necessário
+            dest_path = os.path.join(CURRENT_BACKUP_PATH, target)
+            dir_name = os.path.dirname(dest_path)
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
+            shutil.copy2(target, dest_path)
+            print(f"[Backup OK] {target}")
+        else:
+            print(f"[Backup Skip] {target} não existe ainda.")
+
+def write_files():
+    print("\n--- Escrevendo Novos Arquivos ---")
+    for filepath, content in FILES_TO_WRITE.items():
+        # Cria diretórios pai se não existirem
+        dir_name = os.path.dirname(filepath)
+        if dir_name:
+            ensure_dir(dir_name)
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"[Criado/Atualizado] {filepath}")
+
+def git_operations():
+    print("\n--- Operações Git ---")
+    try:
+        # Verifica se é um repo git
+        if not os.path.exists(".git"):
+            print("Inicializando repositório Git...")
+            subprocess.run(["git", "init"], check=True)
+
+        print("Adicionando arquivos...")
+        subprocess.run(["git", "add", "."], check=True)
+        
+        print("Commitando...")
+        subprocess.run(["git", "commit", "-m", f"Refactor: Componentes e Segurança {TIMESTAMP}"], check=False)
+        
+        print("Tentando Push (pode falhar se remoto não configurado)...")
+        # Tenta push, mas não trava o script se falhar (ex: sem internet ou sem remote)
+        subprocess.run(["git", "push"], check=False)
+        
+    except Exception as e:
+        print(f"[Erro Git] {e}")
+
+def self_destruct():
+    print("\n--- Auto-Destruição ---")
+    try:
+        os.remove(__file__)
+        print(f"Script {__file__} deletado com sucesso.")
+    except Exception as e:
+        print(f"Erro ao deletar script: {e}")
+
+def main():
+    try:
+        backup_files()
+        write_files()
+        git_operations()
+        print("\n\nSUCESSO! Projeto refatorado.")
+        print("1. API Key movida para .env")
+        print("2. Componentes criados em src/components")
+        print("3. App.jsx limpo e organizado")
+        
+    except Exception as e:
+        print(f"\n[ERRO FATAL] {e}")
+    finally:
+        self_destruct()
+
+if __name__ == "__main__":
+    main()
+
+

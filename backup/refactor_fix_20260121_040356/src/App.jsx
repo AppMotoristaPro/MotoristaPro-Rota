@@ -1,27 +1,49 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  Upload, Navigation, Check, Trash2, Plus, 
-  ArrowLeft, Sliders, MapPin, Package, Clock, Box, 
-  Map as MapIcon, Loader2, Search, X, List, Crosshair
+  Upload, Navigation, Check, AlertTriangle, Trash2, Plus, 
+  ArrowLeft, Sliders, MapPin, Package, Clock, ChevronDown, 
+  ChevronUp, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
-import { useJsApiLoader } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, DirectionsRenderer, DirectionsService } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-// Componentes Refatorados
-import MapView from './components/MapView';
-import RouteList from './components/RouteList';
-
-const DB_KEY = 'mp_db_v48_refactored';
-// Usando variável de ambiente
-const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const DB_KEY = 'mp_db_v47_syntax_fix';
+const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
 // --- HELPERS ---
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
     if (typeof val === 'object') return JSON.stringify(val);
     return String(val).trim();
+};
+
+const getMarkerIcon = (status, isCurrent) => {
+    const path = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z";
+    let fillColor = "#3B82F6"; 
+    if (status === 'success') fillColor = "#10B981";
+    if (status === 'failed') fillColor = "#EF4444";
+    if (status === 'partial') fillColor = "#F59E0B";
+    if (isCurrent) fillColor = "#0F172A";
+
+    return {
+        path: path,
+        fillColor: fillColor,
+        fillOpacity: 1,
+        strokeWeight: 1.5,
+        strokeColor: "#FFFFFF",
+        scale: isCurrent ? 2.0 : 1.4,
+        anchor: { x: 12, y: 22 },
+        labelOrigin: { x: 12, y: 10 }
+    };
+};
+
+const mapContainerStyle = { width: '100%', height: '100%' };
+const mapOptions = {
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false
 };
 
 const groupStopsByStopName = (stops) => {
@@ -46,20 +68,65 @@ const groupStopsByStopName = (stops) => {
         const key = (safeStr(stop.stopName) || 'Sem Nome').toLowerCase();
         if (!seen.has(key)) {
             const g = groups[key];
-            if (g) {
-                const t = g.items.length;
-                const s = g.items.filter(i => i.status === 'success').length;
-                const f = g.items.filter(i => i.status === 'failed').length;
-                if (s === t) g.status = 'success';
-                else if (f === t) g.status = 'failed';
-                else if (s+f > 0) g.status = 'partial';
-                else g.status = 'pending';
-                ordered.push(g);
-                seen.add(key);
-            }
+            const t = g.items.length;
+            const s = g.items.filter(i => i.status === 'success').length;
+            const f = g.items.filter(i => i.status === 'failed').length;
+            if (s === t) g.status = 'success';
+            else if (f === t) g.status = 'failed';
+            else if (s+f > 0) g.status = 'partial';
+            else g.status = 'pending';
+            ordered.push(g);
+            seen.add(key);
         }
     });
     return ordered;
+};
+
+const optimizeRollingChain = async (allStops, startPos) => {
+    let unvisited = [...allStops];
+    let finalRoute = [];
+    let currentPos = startPos;
+    const service = new window.google.maps.DirectionsService();
+
+    while (unvisited.length > 0) {
+        unvisited.sort((a, b) => {
+            const dA = Math.pow(a.lat - currentPos.lat, 2) + Math.pow(a.lng - currentPos.lng, 2);
+            const dB = Math.pow(b.lat - currentPos.lat, 2) + Math.pow(b.lng - currentPos.lng, 2);
+            return dA - dB;
+        });
+
+        const batch = unvisited.slice(0, 23);
+        unvisited = unvisited.slice(23);
+
+        const waypoints = batch.map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
+        
+        try {
+            const result = await new Promise((resolve, reject) => {
+                service.route({
+                    origin: currentPos,
+                    destination: batch[batch.length - 1], 
+                    waypoints: waypoints,
+                    optimizeWaypoints: true,
+                    travelMode: 'DRIVING'
+                }, (res, status) => {
+                    if (status === 'OK') resolve(res);
+                    else reject(status);
+                });
+            });
+
+            const order = result.routes[0].waypoint_order;
+            const orderedBatch = order.map(idx => batch[idx]);
+            finalRoute.push(...orderedBatch);
+            currentPos = orderedBatch[orderedBatch.length - 1];
+            await new Promise(r => setTimeout(r, 300));
+
+        } catch (e) {
+            console.warn("Falha Google Batch:", e);
+            finalRoute.push(...batch);
+            currentPos = batch[batch.length - 1];
+        }
+    }
+    return finalRoute;
 };
 
 const calculateRemainingMetrics = (stops, userPos) => {
@@ -99,54 +166,6 @@ const calculateRemainingMetrics = (stops, userPos) => {
     };
 };
 
-// Lógica de Otimização
-const optimizeRollingChain = async (allStops, startPos) => {
-    let unvisited = [...allStops];
-    let finalRoute = [];
-    let currentPos = startPos;
-    const service = new window.google.maps.DirectionsService();
-
-    while (unvisited.length > 0) {
-        unvisited.sort((a, b) => {
-            const dA = Math.pow(a.lat - currentPos.lat, 2) + Math.pow(a.lng - currentPos.lng, 2);
-            const dB = Math.pow(b.lat - currentPos.lat, 2) + Math.pow(b.lng - currentPos.lng, 2);
-            return dA - dB;
-        });
-
-        const batch = unvisited.slice(0, 23); // Limite do Google
-        unvisited = unvisited.slice(23);
-
-        const waypoints = batch.map(p => ({ location: { lat: p.lat, lng: p.lng }, stopover: true }));
-        
-        try {
-            const result = await new Promise((resolve, reject) => {
-                service.route({
-                    origin: currentPos,
-                    destination: batch[batch.length - 1], 
-                    waypoints: waypoints,
-                    optimizeWaypoints: true,
-                    travelMode: 'DRIVING'
-                }, (res, status) => {
-                    if (status === 'OK') resolve(res);
-                    else reject(status);
-                });
-            });
-
-            const order = result.routes[0].waypoint_order;
-            const orderedBatch = order.map(idx => batch[idx]);
-            finalRoute.push(...orderedBatch);
-            currentPos = orderedBatch[orderedBatch.length - 1];
-            await new Promise(r => setTimeout(r, 300)); 
-
-        } catch (e) {
-            console.warn("Falha Google Batch:", e);
-            finalRoute.push(...batch);
-            currentPos = batch[batch.length - 1];
-        }
-    }
-    return finalRoute;
-};
-
 export default function App() {
   const [routes, setRoutes] = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(null);
@@ -162,8 +181,10 @@ export default function App() {
   const [showStartModal, setShowStartModal] = useState(false);
   const [customStartAddr, setCustomStartAddr] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [selectedMarker, setSelectedMarker] = useState(null);
   
   const [directionsResponse, setDirectionsResponse] = useState(null);
+  const [mapInstance, setMapInstance] = useState(null);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -330,11 +351,21 @@ export default function App() {
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
+  const filteredGroups = useMemo(() => {
+      if (!searchQuery) return groupedStops;
+      const lower = searchQuery.toLowerCase();
+      return groupedStops.filter(g => 
+          safeStr(g.mainName).toLowerCase().includes(lower) || 
+          safeStr(g.mainAddress).toLowerCase().includes(lower)
+      );
+  }, [groupedStops, searchQuery]);
+
   const metrics = useMemo(() => {
       if (!activeRoute) return { km: "0", time: "0h 0m", remainingPackages: 0 };
       return calculateRemainingMetrics(activeRoute.stops, userPos);
   }, [activeRoute, userPos, routes]);
 
+  // DIRECTIONS
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -350,6 +381,7 @@ export default function App() {
       }
   }, [nextGroup?.id, userPos?.lat, userPos?.lng, isLoaded]);
 
+  // VIEW: HOME
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-10 bg-slate-50">
           <div className="flex justify-between items-center mb-8">
@@ -373,6 +405,7 @@ export default function App() {
       </div>
   );
 
+  // VIEW: CREATE
   if (view === 'create') return (
       <div className="min-h-screen bg-white flex flex-col p-6">
           <button onClick={() => setView('home')} className="self-start mb-6"><ArrowLeft/></button>
@@ -389,6 +422,7 @@ export default function App() {
       </div>
   );
 
+  // VIEW: DETAILS
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
@@ -448,25 +482,97 @@ export default function App() {
 
           {showMap ? (
               <div className="flex-1 relative bg-slate-100">
-                  <MapView 
-                      userPos={userPos} 
-                      groupedStops={groupedStops} 
-                      directionsResponse={directionsResponse}
-                      nextGroup={nextGroup}
-                      openNav={openNav}
-                      isLoaded={isLoaded}
-                  />
+                  {isLoaded ? (
+                      <GoogleMap
+                          mapContainerStyle={mapContainerStyle}
+                          center={userPos || { lat: -23.55, lng: -46.63 }}
+                          zoom={14}
+                          options={mapOptions}
+                          onLoad={setMapInstance}
+                      >
+                          {directionsResponse && <DirectionsRenderer directions={directionsResponse} options={{ suppressMarkers: true, polylineOptions: { strokeColor: "#2563EB", strokeWeight: 5 } }} />}
+                          
+                          {groupedStops.map((g, idx) => (
+                              <MarkerF 
+                                key={g.id} 
+                                position={{ lat: g.lat, lng: g.lng }}
+                                label={{ text: String(idx + 1), color: "white", fontSize: "12px", fontWeight: "bold" }}
+                                icon={getMarkerIcon(g.status, nextGroup && g.id === nextGroup.id)}
+                                onClick={() => setSelectedMarker(g)}
+                              />
+                          ))}
+                          {userPos && <MarkerF position={{ lat: userPos.lat, lng: userPos.lng }} icon={getMarkerIcon('current', true)} />}
+
+                          {selectedMarker && (
+                            <InfoWindowF position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} onCloseClick={() => setSelectedMarker(null)}>
+                                <div className="p-2 min-w-[200px]">
+                                    <h3 className="font-bold text-sm mb-1">Parada: {safeStr(selectedMarker.mainName)}</h3>
+                                    <p className="text-xs text-slate-500 mb-2">{safeStr(selectedMarker.mainAddress)}</p>
+                                    <button onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} className="w-full bg-blue-600 text-white py-2 rounded text-xs font-bold">NAVEGAR AQUI</button>
+                                </div>
+                            </InfoWindowF>
+                          )}
+                      </GoogleMap>
+                  ) : <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin"/></div>}
               </div>
           ) : (
-              <RouteList 
-                  groupedStops={groupedStops}
-                  nextGroup={nextGroup}
-                  activeRoute={activeRoute}
-                  searchQuery={searchQuery}
-                  expandedGroups={expandedGroups}
-                  toggleGroup={toggleGroup}
-                  setStatus={setStatus}
-              />
+              <div className="flex-1 overflow-y-auto px-5 pt-4 pb-safe space-y-3">
+                  {!searchQuery && nextGroup && activeRoute.optimized && (
+                      <div className="modern-card p-6 border-l-4 border-slate-900 bg-white relative mb-6 shadow-md">
+                          <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl">PRÓXIMO</div>
+                          <h3 className="text-xl font-bold text-slate-900 leading-tight mb-1">Parada: {safeStr(nextGroup.mainName)}</h3>
+                          <p className="text-sm text-slate-500 mb-4">{nextGroup.items.length} pacotes a serem entregues nessa parada</p>
+                          <div className="space-y-3 border-t border-slate-100 pt-3">
+                              {nextGroup.items.map((item, idx) => {
+                                  if (item.status !== 'pending') return null;
+                                  return (
+                                      <div key={item.id} className="flex flex-col bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                          <div className="mb-3">
+                                              <span className="text-xs font-bold text-blue-600 block mb-1">PACOTE #{idx + 1}</span>
+                                              <span className="text-sm font-bold text-slate-800 block leading-tight">{safeStr(item.address)}</span>
+                                          </div>
+                                          <div className="flex gap-2 w-full">
+                                              <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 btn-action-lg btn-outline-red rounded-xl">Não Entregue</button>
+                                              <button onClick={() => setStatus(item.id, 'success')} className="flex-1 btn-action-lg btn-gradient-green rounded-xl text-white shadow-md">ENTREGUE</button>
+                                          </div>
+                                      </div>
+                                  )
+                              })}
+                          </div>
+                      </div>
+                  )}
+
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Lista</h4>
+                  {filteredGroups.map((group, idx) => {
+                      if (!searchQuery && nextGroup && group.id === nextGroup.id && activeRoute.optimized) return null;
+                      const isExpanded = expandedGroups[group.id];
+                      const hasMulti = group.items.length > 1;
+                      const statusClass = `border-l-status-${group.status}`;
+                      return (
+                          <div key={group.id} className={`modern-card overflow-hidden ${statusClass} ${group.status !== 'pending' && !searchQuery ? 'opacity-60 grayscale' : ''}`}>
+                              <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{group.status === 'success' ? <Check size={14}/> : (idx + 1)}</div>
+                                  <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2"><h4 className="font-bold text-slate-800 text-sm truncate">Parada: {safeStr(group.mainName)}</h4></div>
+                                      <p className="text-xs text-slate-400 truncate">{group.items.length} pacotes a serem entregues nessa parada</p>
+                                  </div>
+                                  {hasMulti || isExpanded ? (isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>) : (group.items[0].status === 'pending' && <button onClick={(e) => {e.stopPropagation(); setStatus(group.items[0].id, 'success')}} className="p-2 bg-slate-50 text-slate-400 rounded-full"><Check size={18}/></button>)}
+                              </div>
+                              {(isExpanded || (hasMulti && isExpanded)) && (
+                                  <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-3">
+                                      {group.items.map((item, subIdx) => (
+                                          <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
+                                              <div className="mb-2"><span className="text-[10px] font-bold text-blue-500 block">ENDEREÇO</span><span className="text-sm font-bold text-slate-700 block">{safeStr(item.address)}</span></div>
+                                              {item.status === 'pending' ? (<div className="flex gap-2 w-full"><button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 btn-outline-red rounded font-bold text-xs">NÃO ENTREGUE</button><button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 btn-gradient-green rounded font-bold text-xs text-white shadow-sm">ENTREGUE</button></div>) : (<span className="text-xs font-bold">{item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}</span>)}
+                                          </div>
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                      )
+                  })}
+                  <div className="h-10"></div>
+              </div>
           )}
       </div>
   );
