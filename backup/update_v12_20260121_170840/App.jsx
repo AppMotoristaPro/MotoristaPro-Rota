@@ -1,15 +1,4 @@
-import os
-import shutil
-import datetime
-import subprocess
-
-# --- CONFIGURAÇÕES ---
-BACKUP_DIR = "backup"
-TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"fix_v10_{TIMESTAMP}")
-
-# --- CONTEÚDO DO APP.JSX (SEM F-STRING PARA EVITAR ERROS) ---
-APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, Sliders, MapPin, 
   Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Check
@@ -480,39 +469,3 @@ export default function App() {
       </div>
   );
 }
-"""
-
-FILES_TO_WRITE = {
-    "src/App.jsx": APP_JSX_CONTENT
-}
-
-def write_files():
-    for path, content in FILES_TO_WRITE.items():
-        dir_name = os.path.dirname(path)
-        if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-        print(f"Escrevendo {path}")
-
-def main():
-    print(f"--- Iniciando Fix V10 {TIMESTAMP} ---")
-    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
-    os.makedirs(CURRENT_BACKUP_PATH)
-    
-    if os.path.exists("src/App.jsx"): shutil.copy2("src/App.jsx", CURRENT_BACKUP_PATH)
-
-    write_files()
-
-    print("--- Git Push ---")
-    subprocess.run("git add .", shell=True)
-    subprocess.run(f'git commit -m "Fix V10: Check Import and F-string - {TIMESTAMP}"', shell=True)
-    subprocess.run("git push", shell=True)
-
-    print("--- Limpeza ---")
-    os.remove(__file__)
-    print("Concluído.")
-
-if __name__ == "__main__":
-    main()
-
-
