@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, Sliders, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair, Check
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Crosshair
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
@@ -59,39 +59,7 @@ const groupStopsByStopName = (stops) => {
     return ordered;
 };
 
-// Cálculo de Métricas Totais Restaurado
-const calculateTotalMetrics = (stops) => {
-    if (!Array.isArray(stops) || stops.length === 0) return { km: "0", time: "0h", remaining: 0 };
-    
-    let totalKm = 0;
-    for (let i = 0; i < stops.length - 1; i++) {
-        const p1 = stops[i];
-        const p2 = stops[i+1];
-        const R = 6371; 
-        const dLat = (p2.lat - p1.lat) * Math.PI / 180;
-        const dLon = (p2.lng - p1.lng) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                  Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-        totalKm += R * c;
-    }
-
-    const realKm = totalKm * 1.5; // Fator urbano
-    const avgSpeed = 20; 
-    const serviceTime = stops.length * 4; 
-    const totalMin = (realKm / avgSpeed * 60) + serviceTime;
-    
-    const h = Math.floor(totalMin / 60);
-    const m = Math.floor(totalMin % 60);
-    
-    return { 
-        km: realKm.toFixed(1), 
-        time: `${h}h ${m}m`,
-        remaining: stops.filter(s => s.status === 'pending').length 
-    };
-};
-
-// Otimização Precisa
+// Item 6: Otimização Precisa
 const optimizeRollingChain = async (allStops, startPos) => {
     let unvisited = [...allStops];
     let finalRoute = [];
@@ -156,7 +124,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
-  const [realMetrics, setRealMetrics] = useState(null);
+  // Item 7: Estado para métricas reais da API
+  const [realMetrics, setRealMetrics] = useState({ dist: "0 km", time: "0 min" });
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -317,11 +286,7 @@ export default function App() {
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
   const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
-  const metrics = useMemo(() => {
-      if (!activeRoute) return { km: "0", time: "0h", remaining: 0 };
-      return calculateTotalMetrics(activeRoute.stops);
-  }, [activeRoute]);
-
+  // Google Directions Metrics (Item 5, 7)
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -332,13 +297,23 @@ export default function App() {
           }, (res, status) => {
               if (status === 'OK') {
                   setDirectionsResponse(res);
-                  const leg = res.routes[0].legs[0];
-                  if(leg) {
-                      setRealMetrics({
-                          dist: leg.distance.text,
-                          time: leg.duration.text
+                  // Soma todas as legs da rota para métrica precisa
+                  const route = res.routes[0];
+                  let totalDist = 0;
+                  let totalDur = 0;
+                  if (route.legs) {
+                      route.legs.forEach(leg => {
+                          totalDist += leg.distance.value;
+                          totalDur += leg.duration.value;
                       });
                   }
+                  // Converte
+                  const km = (totalDist / 1000).toFixed(1) + " km";
+                  const hours = Math.floor(totalDur / 3600);
+                  const mins = Math.floor((totalDur % 3600) / 60);
+                  const time = (hours > 0 ? `${hours}h ` : "") + `${mins}min`;
+                  
+                  setRealMetrics({ dist: km, time: time });
               }
           });
       } else {
@@ -355,7 +330,7 @@ export default function App() {
           {routes.length === 0 ? <div className="text-center mt-32 opacity-40"><MapIcon size={48} className="mx-auto mb-4"/><p>Nenhuma rota</p></div> : 
               <div className="space-y-4">
                   {routes.map(r => (
-                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer mb-4">
+                      <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="modern-card p-5 cursor-pointer">
                           <h3 className="font-bold text-lg">{safeStr(r.name)}</h3>
                           <div className="flex gap-4 text-sm text-slate-500 mt-2">
                               <span>{r.stops.length} vols</span>
@@ -414,16 +389,17 @@ export default function App() {
               {!showMap && (
                   <div className="relative mb-4">
                       <Search size={18} className="absolute left-3 top-3 text-slate-400"/>
-                      <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl search-input text-sm font-medium outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}/>
+                      <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl search-input text-sm font-medium outline-none" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
                       {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400"><X size={16}/></button>}
                   </div>
               )}
 
-              {activeRoute.optimized && realMetrics && !showMap && (
+              {/* Display de Métricas Reais do Google */}
+              {activeRoute.optimized && !searchQuery && !showMap && (
                   <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
-                      <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{realMetrics.dist}</span></div>
+                      <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{realMetrics ? realMetrics.dist : "..."}</span></div>
                       <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold">{realMetrics.time}</span></div>
+                      <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold">{realMetrics ? realMetrics.time : "..."}</span></div>
                       <div className="w-px h-4 bg-slate-200"></div>
                       <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold">{activeRoute.stops.filter(s => s.status === 'pending').length} rest.</span></div>
                   </div>
