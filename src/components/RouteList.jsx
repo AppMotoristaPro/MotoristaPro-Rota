@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Edit3, Package, Pencil, Map as MapIcon } from 'lucide-react';
+import { Check, ChevronUp, ChevronDown, Layers, Package, Pencil } from 'lucide-react';
 
 export default function RouteList(props) {
     const { 
@@ -10,7 +10,6 @@ export default function RouteList(props) {
         expandedGroups = {}, 
         toggleGroup, 
         setStatus,
-        onStartReorder,
         onEditAddress
     } = props;
 
@@ -22,7 +21,6 @@ export default function RouteList(props) {
         });
     };
 
-    // ITEM 3: Edição preenchida corretamente
     const handleEditAddressClick = (e, item) => {
         e.stopPropagation();
         const currentVal = item.address ? String(item.address) : ""; 
@@ -40,22 +38,12 @@ export default function RouteList(props) {
     return (
         <div className="flex-1 overflow-y-auto px-4 pt-4 pb-safe space-y-3 relative bg-slate-50">
             
-            {!searchQuery && (
-                <div className="flex justify-end mb-2">
-                    <button 
-                        onClick={onStartReorder} 
-                        className="text-[10px] font-bold px-3 py-2 rounded-full flex items-center gap-2 transition uppercase tracking-wider bg-slate-900 text-white shadow-lg active:scale-95"
-                    >
-                        <MapIcon size={12}/> Editar Sequência no Mapa
-                    </button>
-                </div>
-            )}
+            {/* Botão de editar movido para o mapa conforme pedido */}
 
             {!searchQuery && nextGroup && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
                     <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
-                       {/* ITEM 4: Título com numero da Planilha */}
                        {nextGroup.displayOrder ? `Parada ${nextGroup.displayOrder}` : 'Parada S/N'}
                     </h3>
                     <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
@@ -100,16 +88,13 @@ export default function RouteList(props) {
                 (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
                     <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
                         <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
-                            
-                            {/* ITEM 4: Círculo com a ORDEM DE VISITA (Index + 1) */}
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                                 {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
                             </div>
 
                             <div className="flex-1 min-w-0">
-                                {/* ITEM 4: Título com o ID da Planilha */}
                                 <h4 className="font-bold text-slate-800 text-sm truncate">
-                                    {group.displayOrder ? `Parada: ${group.displayOrder}` : 'Sem ID'}
+                                    {group.displayOrder ? `Parada: ${group.displayOrder}` : group.mainName}
                                 </h4>
                                 <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
                             </div>

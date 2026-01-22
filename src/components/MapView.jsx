@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
-import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, Undo2 } from 'lucide-react';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, Edit3 } from 'lucide-react';
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 const mapOptions = {
@@ -54,7 +54,8 @@ export default function MapView({
     setAllStatus,
     isReordering, 
     reorderList, 
-    onMarkerClick 
+    onMarkerClick,
+    onStartReorder // Nova prop para ativar edição direto do mapa
 }) {
     const [selectedMarker, setSelectedMarker] = useState(null);
     const [mapInstance, setMapInstance] = useState(null);
@@ -70,137 +71,134 @@ export default function MapView({
     };
 
     return (
-        <GoogleMap
-            mapContainerStyle={mapContainerStyle}
-            center={userPos || { lat: -23.55, lng: -46.63 }}
-            zoom={15}
-            options={mapOptions}
-            onLoad={setMapInstance}
-        >
-            {!isReordering && directionsResponse && (
-                <DirectionsRenderer 
-                    directions={directionsResponse} 
-                    options={{ 
-                        suppressMarkers: true, 
-                        polylineOptions: { strokeColor: "#2563EB", strokeWeight: 6, strokeOpacity: 0.8 } 
-                    }} 
-                />
-            )}
-            
-            {groupedStops.map((g) => {
-                // LÓGICA DE LABEL CORRIGIDA (ITEM 2)
-                let labelText = null; 
-
-                if (isReordering) {
-                    const newIndex = reorderList.indexOf(g.id);
-                    if (newIndex !== -1) {
-                        labelText = String(newIndex + 1); 
-                    }
-                    // Se não selecionado, labelText fica null (sem texto), evitando [object Object]
-                } else {
-                    if (g.displayOrder !== null && g.displayOrder !== undefined) {
-                        labelText = String(g.displayOrder);
-                    }
-                }
-
-                return (
-                    <MarkerF 
-                        key={g.id} 
-                        position={{ lat: g.lat, lng: g.lng }}
-                        label={labelText ? { text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" } : null}
-                        icon={getMarkerIcon(
-                            g.status, 
-                            !isReordering && nextGroup && g.id === nextGroup.id,
-                            isReordering,
-                            isReordering ? reorderList.indexOf(g.id) : -1
-                        )}
-                        onClick={() => handleMarkerClick(g)}
-                        zIndex={10}
+        <div className="relative w-full h-full">
+            <GoogleMap
+                mapContainerStyle={mapContainerStyle}
+                center={userPos || { lat: -23.55, lng: -46.63 }}
+                zoom={15}
+                options={mapOptions}
+                onLoad={setMapInstance}
+            >
+                {!isReordering && directionsResponse && (
+                    <DirectionsRenderer 
+                        directions={directionsResponse} 
+                        options={{ 
+                            suppressMarkers: true, 
+                            polylineOptions: { strokeColor: "#2563EB", strokeWeight: 6, strokeOpacity: 0.8 } 
+                        }} 
                     />
-                )
-            })}
-            
-            {userPos && (
-                <MarkerF 
-                    position={{ lat: userPos.lat, lng: userPos.lng }} 
-                    icon={{
-                        path: window.google.maps.SymbolPath.CIRCLE,
-                        scale: 8,
-                        fillColor: "#3B82F6",
-                        fillOpacity: 1,
-                        strokeWeight: 3,
-                        strokeColor: "white",
-                    }}
-                    zIndex={2000}
-                />
-            )}
+                )}
+                
+                {groupedStops.map((g, idx) => {
+                    // ITEM 2: Pino mostra a ORDEM DE VISITA (1, 2, 3...)
+                    let labelText = String(idx + 1); 
 
-            {selectedMarker && !isReordering && (
-                <InfoWindowF 
-                    position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
-                    onCloseClick={() => setSelectedMarker(null)}
-                >
-                    <div className="p-1 min-w-[240px] max-w-[260px]">
-                        <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
-                            <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
-                            <div>
-                                <h3 className="font-bold text-sm text-slate-800 leading-tight">
-                                    {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID Planilha'}
-                                </h3>
-                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
-                            </div>
-                        </div>
-                        
-                        {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
-                            <button 
-                                onClick={() => {
-                                    setAllStatus(selectedMarker.items, 'success');
-                                    setSelectedMarker(null);
-                                }}
-                                className="w-full mb-2 bg-green-100 text-green-700 py-1.5 rounded border border-green-200 text-[10px] font-bold flex items-center justify-center gap-2"
-                            >
-                                <Layers size={12}/> ENTREGAR TODOS ({selectedMarker.items.filter(i => i.status === 'pending').length})
-                            </button>
-                        )}
+                    if (isReordering) {
+                        const newIndex = reorderList.indexOf(g.id);
+                        if (newIndex !== -1) {
+                            labelText = String(newIndex + 1); 
+                        } else {
+                            labelText = null; // Limpa texto se não selecionado
+                        }
+                    }
 
-                        <div className="max-h-[150px] overflow-y-auto mb-2 space-y-2">
-                            {selectedMarker.items.map((item) => (
-                                <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
-                                    <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
-                                    
-                                    {item.status === 'pending' ? (
-                                        <div className="flex gap-1">
-                                            <button 
-                                                onClick={() => setStatus(item.id, 'failed')}
-                                                className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"
-                                            >
-                                                <XCircle size={10}/> Falha
-                                            </button>
-                                            <button 
-                                                onClick={() => setStatus(item.id, 'success')}
-                                                className="flex-1 bg-green-500 text-white py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm"
-                                            >
-                                                <CheckCircle size={10}/> Entregue
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded w-full block text-center ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
-                                            {item.status === 'success' ? 'ENTREGUE' : 'FALHOU'}
-                                        </span>
-                                    )}
+                    return (
+                        <MarkerF 
+                            key={g.id} 
+                            position={{ lat: g.lat, lng: g.lng }}
+                            label={labelText ? { text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" } : null}
+                            icon={getMarkerIcon(
+                                g.status, 
+                                !isReordering && nextGroup && g.id === nextGroup.id,
+                                isReordering,
+                                isReordering ? reorderList.indexOf(g.id) : -1
+                            )}
+                            onClick={() => handleMarkerClick(g)}
+                            zIndex={10}
+                        />
+                    )
+                })}
+                
+                {userPos && (
+                    <MarkerF 
+                        position={{ lat: userPos.lat, lng: userPos.lng }} 
+                        icon={{
+                            path: window.google.maps.SymbolPath.CIRCLE,
+                            scale: 8,
+                            fillColor: "#3B82F6",
+                            fillOpacity: 1,
+                            strokeWeight: 3,
+                            strokeColor: "white",
+                        }}
+                        zIndex={2000}
+                    />
+                )}
+
+                {/* JANELA DE INFORMAÇÃO */}
+                {selectedMarker && !isReordering && (
+                    <InfoWindowF 
+                        position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
+                        onCloseClick={() => setSelectedMarker(null)}
+                    >
+                        <div className="p-1 min-w-[240px] max-w-[260px]">
+                            <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
+                                <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
+                                <div>
+                                    {/* ITEM 2: Janela mostra ID DA PLANILHA (stopId) */}
+                                    <h3 className="font-bold text-sm text-slate-800 leading-tight">
+                                        {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID'}
+                                    </h3>
+                                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
                                 </div>
-                            ))}
-                        </div>
+                            </div>
+                            
+                            {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
+                                <button 
+                                    onClick={() => {
+                                        setAllStatus(selectedMarker.items, 'success');
+                                        setSelectedMarker(null);
+                                    }}
+                                    className="w-full mb-2 bg-green-100 text-green-700 py-1.5 rounded border border-green-200 text-[10px] font-bold flex items-center justify-center gap-2"
+                                >
+                                    <Layers size={12}/> ENTREGAR TODOS ({selectedMarker.items.filter(i => i.status === 'pending').length})
+                                </button>
+                            )}
 
-                        <button 
-                            onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} 
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm"
-                        >
-                            <Navigation size={14}/> Navegar
-                        </button>
-                    </div>
-                </InfoWindowF>
+                            <div className="max-h-[150px] overflow-y-auto mb-2 space-y-2">
+                                {selectedMarker.items.map((item) => (
+                                    <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
+                                        <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
+                                        {item.status === 'pending' ? (
+                                            <div className="flex gap-1">
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"><XCircle size={10}/> Falha</button>
+                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 bg-green-500 text-white py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm"><CheckCircle size={10}/> Entregue</button>
+                                            </div>
+                                        ) : (
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded w-full block text-center ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{item.status === 'success' ? 'ENTREGUE' : 'FALHOU'}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <button onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm">
+                                <Navigation size={14}/> Navegar
+                            </button>
+                        </div>
+                    </InfoWindowF>
+                )}
+            </GoogleMap>
+
+            {/* ITEM 1: BOTÃO EDITAR NO MAPA (Topo Direito) */}
+            {!isReordering && (
+                <div className="absolute top-4 right-4 z-50">
+                    <button 
+                        onClick={onStartReorder}
+                        className="bg-white text-slate-700 p-3 rounded-full shadow-lg border border-slate-200 flex items-center justify-center active:scale-95 transition"
+                    >
+                        <Edit3 size={20} />
+                    </button>
+                </div>
             )}
-        </GoogleMap>
+        </div>
     );
 }
