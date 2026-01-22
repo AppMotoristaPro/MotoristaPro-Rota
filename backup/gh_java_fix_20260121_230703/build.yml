@@ -1,0 +1,57 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install Dependencies
+        run: npm install
+        
+      - name: Build Web Assets
+        run: npm run build
+        
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      # REMOVE PLATAFORMA ANTIGA SE EXISTIR (Limpeza para garantir build fresco)
+      - name: Clean Android Platform
+        run: rm -rf android
+        
+      # FIX: Uso explícito do @capacitor/cli para evitar erro "could not determine executable"
+      - name: Add Android Platform
+        run: npx @capacitor/cli add android
+      
+      # INJETAR PERMISSÕES NO ANDROID MANIFEST
+      - name: Inject Android Permissions
+        run: |
+          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" \/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" \/><uses-feature android:name="android.hardware.location.gps" \/><\/manifest>/' android/app/src/main/AndroidManifest.xml
+          cat android/app/src/main/AndroidManifest.xml
+        
+      - name: Sync Capacitor
+        run: npx @capacitor/cli sync
+        
+      - name: Build APK (Debug)
+        working-directory: android
+        run: ./gradlew assembleDebug
+        
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotoristaPro-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
