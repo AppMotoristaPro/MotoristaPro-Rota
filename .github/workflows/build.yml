@@ -23,21 +23,19 @@ jobs:
       - name: Build Web Assets
         run: npm run build
         
+      # FIX: Atualizado para Java 21 para corresponder ao projeto Android
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
       
-      # REMOVE PLATAFORMA ANTIGA SE EXISTIR (Limpeza para garantir build fresco)
       - name: Clean Android Platform
         run: rm -rf android
         
-      # FIX: Uso explícito do @capacitor/cli para evitar erro "could not determine executable"
       - name: Add Android Platform
         run: npx @capacitor/cli add android
       
-      # INJETAR PERMISSÕES NO ANDROID MANIFEST
       - name: Inject Android Permissions
         run: |
           sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" \/><uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" \/><uses-feature android:name="android.hardware.location.gps" \/><\/manifest>/' android/app/src/main/AndroidManifest.xml
