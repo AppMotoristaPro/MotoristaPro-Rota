@@ -10,22 +10,19 @@ const mapOptions = {
 };
 
 const getMarkerIcon = (status, isCurrent, isReordering, reorderIndex) => {
-    let fillColor = "#3B82F6"; // Azul Padrão
+    let fillColor = "#3B82F6"; // Azul
     let scale = 1.6;
     let strokeColor = "#FFFFFF";
-    let labelColor = "white";
 
     if (isReordering) {
-        // Modo Reordenação
         if (reorderIndex !== -1) {
-            fillColor = "#10B981"; // Verde (Já selecionado)
+            fillColor = "#10B981"; // Verde (Selecionado)
             scale = 1.8;
             strokeColor = "#000000";
         } else {
             fillColor = "#94A3B8"; // Cinza (Pendente)
         }
     } else {
-        // Modo Normal
         if (status === 'success') fillColor = "#10B981";
         if (status === 'failed') fillColor = "#EF4444";
         if (isCurrent) {
@@ -90,30 +87,20 @@ export default function MapView({
                 />
             )}
             
-            {groupedStops.map((g) => {
-                // LÓGICA DE LABEL (NÚMERO NO PINO)
-                let labelText = ""; 
+            {groupedStops.map((g, idx) => {
+                // LÓGICA ITEM 1: Pino mostra a ORDEM DE VISITA (Index + 1) ou a nova ordem se editando
+                let labelText = String(idx + 1); 
 
                 if (isReordering) {
-                    // No modo reordenação, mostra a NOVA sequência (1, 2, 3...)
                     const newIndex = reorderList.indexOf(g.id);
-                    if (newIndex !== -1) {
-                        labelText = String(newIndex + 1); 
-                    }
-                    // Se não selecionado, fica sem número ou "?"
-                } else {
-                    // No modo normal, mostra o NÚMERO ORIGINAL DA PLANILHA (Item 1 e 2)
-                    // Se g.displayOrder for null/undefined (planilha sem coluna stop), não mostra nada
-                    if (g.displayOrder) {
-                        labelText = String(g.displayOrder);
-                    }
+                    labelText = (newIndex !== -1) ? String(newIndex + 1) : "";
                 }
 
                 return (
                     <MarkerF 
                         key={g.id} 
                         position={{ lat: g.lat, lng: g.lng }}
-                        label={labelText ? { text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" } : null}
+                        label={{ text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" }}
                         icon={getMarkerIcon(
                             g.status, 
                             !isReordering && nextGroup && g.id === nextGroup.id,
@@ -141,7 +128,6 @@ export default function MapView({
                 />
             )}
 
-            {/* JANELA DE INFORMAÇÃO */}
             {selectedMarker && !isReordering && (
                 <InfoWindowF 
                     position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
@@ -151,14 +137,14 @@ export default function MapView({
                         <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
                             <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
                             <div>
+                                {/* ITEM 1: Janela mostra o número da PLANILHA (stopId) */}
                                 <h3 className="font-bold text-sm text-slate-800 leading-tight">
-                                    {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem Número'}
+                                    {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID Planilha'}
                                 </h3>
                                 <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
                             </div>
                         </div>
                         
-                        {/* BOTÃO ENTREGAR TODOS */}
                         {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
                             <button 
                                 onClick={() => {
