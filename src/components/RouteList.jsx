@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Package, Pencil, Map as MapIcon } from 'lucide-react';
+import { Check, ChevronUp, ChevronDown, Layers, Package, Map as MapIcon } from 'lucide-react';
 
 export default function RouteList(props) {
     const { 
@@ -22,33 +22,15 @@ export default function RouteList(props) {
         });
     };
 
-    const handleEditAddressClick = (e, item) => {
-        e.stopPropagation();
-        const currentVal = item.address ? String(item.address) : ""; 
-        const newAddr = prompt("Editar Endereço:", currentVal); 
-        if (newAddr && newAddr.trim() !== "") {
-            onEditAddress(item.id, newAddr);
-        }
-    };
-
     const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
         safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
         safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     return (
-        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-safe space-y-3 relative bg-slate-50">
+        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 relative bg-slate-50">
             
-            {!searchQuery && (
-                <div className="flex justify-end mb-2">
-                    <button 
-                        onClick={onStartReorder} 
-                        className="text-[10px] font-bold px-3 py-2 rounded-full flex items-center gap-2 transition uppercase tracking-wider bg-slate-900 text-white shadow-lg active:scale-95"
-                    >
-                        <MapIcon size={12}/> Editar Sequência no Mapa
-                    </button>
-                </div>
-            )}
+            {/* REMOVIDO: Botão Editar Sequência daqui (agora só no mapa) */}
 
             {!searchQuery && nextGroup && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
@@ -68,7 +50,6 @@ export default function RouteList(props) {
                     )}
 
                     <div className="space-y-3 border-t border-slate-100 pt-3">
-                        {/* AQUI ESTAVA O ERRO: Faltava o 'idx' nos argumentos do map */}
                         {nextGroup.items.map((item, idx) => (
                             item.status === 'pending' && (
                                 <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100">
@@ -77,7 +58,6 @@ export default function RouteList(props) {
                                             <Package size={14} className="text-blue-400"/>
                                             <span className="text-xs font-bold text-slate-700">PACOTE {idx + 1}</span>
                                         </div>
-                                        <button onClick={(e) => handleEditAddressClick(e, item)} className="text-slate-400 hover:text-blue-600"><Pencil size={12}/></button>
                                     </div>
                                     <p className="text-xs font-medium text-slate-600 mb-3 ml-6">{item.address}</p>
                                     <div className="flex gap-2">
@@ -122,7 +102,7 @@ export default function RouteList(props) {
                                                 <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
                                                 <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
                                             </div>
-                                            {item.status === 'pending' && <button onClick={(e) => handleEditAddressClick(e, item)} className="text-slate-300 hover:text-blue-600"><Pencil size={12}/></button>}
+                                            {/* REMOVIDO: Botão Lápis */}
                                         </div>
                                         {item.status === 'pending' ? (
                                             <div className="flex gap-2 w-full">
