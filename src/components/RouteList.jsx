@@ -30,7 +30,7 @@ export default function RouteList(props) {
         <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 relative bg-slate-50">
             
             {!searchQuery && nextGroup && (
-                <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
+                <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-8">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
                     <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
                        {nextGroup.displayOrder ? `Parada ${nextGroup.displayOrder}` : 'Parada S/N'}
@@ -72,57 +72,60 @@ export default function RouteList(props) {
                 </div>
             )}
 
-            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-2">
+            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-3">
                 Lista de Entregas
             </h4>
             
-            {filteredGroups.map((group, idx) => (
-                (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
-                    <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : group.status === 'failed' ? 'border-red-400 opacity-60' : 'border-slate-300'}`}>
-                        <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : group.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
-                                {group.status === 'success' ? <Check size={14}/> : group.status === 'failed' ? <AlertCircle size={14}/> : (idx + 1)}
-                            </div>
+            {/* ITEM 3: Espaçamento entre cards aumentado (space-y-4 na div pai não funciona bem com key map, melhor mb-4 no item) */}
+            <div className="space-y-4"> 
+                {filteredGroups.map((group, idx) => (
+                    (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
+                        <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
+                            <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                    {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
+                                </div>
 
-                            <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-slate-800 text-sm truncate">
-                                    {group.displayOrder ? `Parada: ${group.displayOrder}` : group.mainName}
-                                </h4>
-                                <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
+                                <div className="flex-1 min-w-0">
+                                    <h4 className="font-bold text-slate-800 text-sm truncate">
+                                        {group.displayOrder ? `Parada: ${group.displayOrder}` : group.mainName}
+                                    </h4>
+                                    <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
+                                </div>
+                                
+                                {group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
                             </div>
                             
-                            {group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
-                        </div>
-                        
-                        {(expandedGroups[group.id] || (group.items.length > 1 && expandedGroups[group.id])) && (
-                            <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
-                                {group.items.map((item) => (
-                                    <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div>
-                                                <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
-                                                <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
+                            {(expandedGroups[group.id] || (group.items.length > 1 && expandedGroups[group.id])) && (
+                                <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
+                                    {group.items.map((item) => (
+                                        <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div>
+                                                    <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
+                                                    <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
+                                                </div>
                                             </div>
+                                            {item.status === 'pending' ? (
+                                                <div className="flex gap-2 w-full">
+                                                    <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase flex items-center justify-center gap-1">
+                                                        <AlertCircle size={12}/> Ocorrência
+                                                    </button>
+                                                    <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm">Entregue</button>
+                                                </div>
+                                            ) : (
+                                                <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
+                                                    {item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}
+                                                </span>
+                                            )}
                                         </div>
-                                        {item.status === 'pending' ? (
-                                            <div className="flex gap-2 w-full">
-                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase flex items-center justify-center gap-1">
-                                                    <AlertCircle size={12}/> Ocorrência
-                                                </button>
-                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm">Entregue</button>
-                                            </div>
-                                        ) : (
-                                            <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
-                                                {item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}
-                                            </span>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )
-            ))}
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )
+                ))}
+            </div>
             <div className="h-12"></div>
         </div>
     );

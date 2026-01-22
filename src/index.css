@@ -5,94 +5,79 @@
 
 body {
   margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: #F8FAFC;
-  color: #1E293B;
+  color: #0F172A;
   -webkit-tap-highlight-color: transparent;
-  padding-bottom: env(safe-area-inset-bottom);
+  /* ITEM 2: Respeita a área segura do topo (Notch/Barra de Status) */
+  padding-top: env(safe-area-inset-top); 
+  height: 100vh; /* Garante altura total */
+  display: flex;
+  flex-direction: column;
 }
 
-.map-container { width: 100%; height: 100%; }
+#root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 
-/* Cards Premium */
 .modern-card {
   background: white;
-  border-radius: 20px;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
-  border: 1px solid #E2E8F0;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: transform 0.1s ease;
   overflow: hidden;
 }
-.modern-card:active { transform: scale(0.98); }
 
-/* Highlight Card (Próxima Parada) */
-.highlight-card {
-  background: white;
-  border-radius: 24px;
-  box-shadow: 0 20px 40px -5px rgba(37, 99, 235, 0.15);
-  border: 2px solid #2563EB;
-  position: relative;
-  overflow: hidden;
-  margin-bottom: 24px;
-}
+.modern-card:active { transform: scale(0.995); }
 
-/* Botões de Ação Grandes e Bonitos */
+/* Botões */
 .btn-action-lg {
   height: 56px;
-  border-radius: 16px;
-  font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+/* ITEM 5: Seletor de Filtro Estilo iOS */
+.segmented-control {
+  background-color: #F1F5F9;
+  padding: 4px;
+  border-radius: 12px;
+  display: flex;
   position: relative;
-  overflow: hidden;
 }
 
-.btn-gradient-green {
-  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-  color: white;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
-  border: none;
+.segmented-option {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748B;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  z-index: 2;
 }
-.btn-gradient-green:active { transform: scale(0.96); }
 
-.btn-outline-red {
-  background: #FFF1F2;
-  color: #BE123C;
-  border: 2px solid #FECDD3;
+.segmented-option.active {
+  background-color: white;
+  color: #0F172A;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
 }
-.btn-outline-red:active { transform: scale(0.96); background: #FFE4E6; }
 
-/* Status Lateral */
-.border-l-status-pending { border-left: 6px solid #CBD5E1; }
-.border-l-status-success { border-left: 6px solid #10B981; background-color: #F0FDF4; opacity: 0.7; }
-.border-l-status-failed { border-left: 6px solid #EF4444; background-color: #FEF2F2; opacity: 0.7; }
-
-/* FAB */
 .fab-main {
   background: #0F172A;
   color: white;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.4);
-}
-
-/* Toast */
-.toast-anim { animation: slideIn 0.3s ease-out forwards; }
-@keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-/* Botão Otimizar Pulsante */
-.btn-optimize-highlight {
-  background: #0F172A;
-  color: white;
-  box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.7);
-  animation: pulse-black 2s infinite;
-}
-@keyframes pulse-black {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(15, 23, 42, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 23, 42, 0); }
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
 }

@@ -1,4 +1,239 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import datetime
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+BACKUP_DIR = "backup"
+TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v40_{TIMESTAMP}")
+
+# CHAVE API
+API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+# --- 1. CSS (SAFE AREA + ESTILO SEGMENTADO) ---
+INDEX_CSS = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F8FAFC;
+  color: #0F172A;
+  -webkit-tap-highlight-color: transparent;
+  /* ITEM 2: Respeita a área segura do topo (Notch/Barra de Status) */
+  padding-top: env(safe-area-inset-top); 
+  height: 100vh; /* Garante altura total */
+  display: flex;
+  flex-direction: column;
+}
+
+#root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.modern-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: transform 0.1s ease;
+  overflow: hidden;
+}
+
+.modern-card:active { transform: scale(0.995); }
+
+/* Botões */
+.btn-action-lg {
+  height: 56px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+/* ITEM 5: Seletor de Filtro Estilo iOS */
+.segmented-control {
+  background-color: #F1F5F9;
+  padding: 4px;
+  border-radius: 12px;
+  display: flex;
+  position: relative;
+}
+
+.segmented-option {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748B;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.segmented-option.active {
+  background-color: white;
+  color: #0F172A;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.fab-main {
+  background: #0F172A;
+  color: white;
+  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
+}
+"""
+
+# --- 2. ROUTE LIST (ESPAÇAMENTO AUMENTADO) ---
+CODE_ROUTE_LIST = """import React, { useState } from 'react';
+import { Check, ChevronUp, ChevronDown, Layers, Package, Map as MapIcon, AlertCircle } from 'lucide-react';
+
+export default function RouteList(props) {
+    const { 
+        groupedStops = [], 
+        nextGroup = null, 
+        activeRoute = {}, 
+        searchQuery = '', 
+        expandedGroups = {}, 
+        toggleGroup, 
+        setStatus,
+        onStartReorder
+    } = props;
+
+    const safeStr = (val) => val ? String(val).trim() : '';
+
+    const setAllStatus = (items, status) => {
+        items.forEach(item => {
+            if (item.status === 'pending') setStatus(item.id, status);
+        });
+    };
+
+    const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
+        safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
+        safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    return (
+        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 relative bg-slate-50">
+            
+            {!searchQuery && nextGroup && (
+                <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-8">
+                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
+                    <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
+                       {nextGroup.displayOrder ? `Parada ${nextGroup.displayOrder}` : 'Parada S/N'}
+                    </h3>
+                    <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
+                    
+                    {nextGroup.items.filter(i => i.status === 'pending').length > 1 && (
+                        <button 
+                            onClick={() => setAllStatus(nextGroup.items, 'success')}
+                            className="w-full mb-4 py-3 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-blue-100 active:scale-95 transition"
+                        >
+                            <Layers size={16}/> ENTREGAR TODOS ({nextGroup.items.filter(i => i.status === 'pending').length})
+                        </button>
+                    )}
+
+                    <div className="space-y-3 border-t border-slate-100 pt-3">
+                        {nextGroup.items.map((item, idx) => (
+                            item.status === 'pending' && (
+                                <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <Package size={14} className="text-blue-400"/>
+                                            <span className="text-xs font-bold text-slate-700">PACOTE {idx + 1}</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs font-medium text-slate-600 mb-3 ml-6">{item.address}</p>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-3 bg-white border border-red-100 text-red-500 rounded-lg text-[10px] font-bold uppercase shadow-sm flex items-center justify-center gap-1">
+                                            <AlertCircle size={12}/> Ocorrência
+                                        </button>
+                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-[2] py-3 bg-green-500 text-white rounded-lg text-[10px] font-bold uppercase shadow-md active:scale-95 transition">
+                                            Entregue
+                                        </button>
+                                    </div>
+                                </div>
+                            )
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-3">
+                Lista de Entregas
+            </h4>
+            
+            {/* ITEM 3: Espaçamento entre cards aumentado (space-y-4 na div pai não funciona bem com key map, melhor mb-4 no item) */}
+            <div className="space-y-4"> 
+                {filteredGroups.map((group, idx) => (
+                    (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
+                        <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
+                            <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                    {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                    <h4 className="font-bold text-slate-800 text-sm truncate">
+                                        {group.displayOrder ? `Parada: ${group.displayOrder}` : group.mainName}
+                                    </h4>
+                                    <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
+                                </div>
+                                
+                                {group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
+                            </div>
+                            
+                            {(expandedGroups[group.id] || (group.items.length > 1 && expandedGroups[group.id])) && (
+                                <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
+                                    {group.items.map((item) => (
+                                        <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div>
+                                                    <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
+                                                    <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
+                                                </div>
+                                            </div>
+                                            {item.status === 'pending' ? (
+                                                <div className="flex gap-2 w-full">
+                                                    <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase flex items-center justify-center gap-1">
+                                                        <AlertCircle size={12}/> Ocorrência
+                                                    </button>
+                                                    <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm">Entregue</button>
+                                                </div>
+                                            ) : (
+                                                <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
+                                                    {item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )
+                ))}
+            </div>
+            <div className="h-12"></div>
+        </div>
+    );
+}
+"""
+
+# --- 3. APP (DASHBOARD REFORMULADO) ---
+APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
 // ITEM 1: IMPORT CheckCircle ADICIONADO PARA EVITAR CRASH
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
@@ -14,7 +249,7 @@ import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
 const DB_KEY = 'mp_db_v70_finance_pro';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__API_KEY__";
 
 // ... Helpers (sem alterações) ...
 const safeStr = (val) => {
@@ -851,3 +1086,42 @@ export default function App() {
       </div>
   );
 }
+"""
+
+FILES_TO_WRITE = {
+    "src/index.css": INDEX_CSS,
+    "src/components/RouteList.jsx": CODE_ROUTE_LIST,
+    "src/App.jsx": APP_JSX_CONTENT.replace("__API_KEY__", API_KEY_VALUE)
+}
+
+def write_files():
+    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
+    os.makedirs(CURRENT_BACKUP_PATH)
+    
+    # Backup
+    for f in ["src/App.jsx", "src/components/RouteList.jsx", "src/index.css"]:
+        if os.path.exists(f): shutil.copy2(f, CURRENT_BACKUP_PATH)
+
+    for path, content in FILES_TO_WRITE.items():
+        dir_name = os.path.dirname(path)
+        if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"Escrevendo {path}")
+
+def main():
+    print(f"--- Iniciando V40 (Crash Fix + Layout + Week) {TIMESTAMP} ---")
+    write_files()
+    
+    print("--- Git Push ---")
+    subprocess.run("git add .", shell=True)
+    subprocess.run(f'git commit -m "Update V40: Fix Crash, Layout & Week Filter - {TIMESTAMP}"', shell=True)
+    subprocess.run("git push", shell=True)
+    
+    os.remove(__file__)
+    print("Concluído.")
+
+if __name__ == "__main__":
+    main()
+
+
