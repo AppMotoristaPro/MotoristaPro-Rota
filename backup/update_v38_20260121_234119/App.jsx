@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, Filter, AlertCircle
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
@@ -66,16 +66,13 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if (g) {
-                // CORREÇÃO LOGICA V38 (ITEM 1): PRIORIDADE AO PENDENTE
                 const t = g.items.length;
                 const s = g.items.filter(i => i.status === 'success').length;
                 const f = g.items.filter(i => i.status === 'failed').length;
-                
                 if (s === t) g.status = 'success';
                 else if (f === t) g.status = 'failed';
-                else if (s + f === t) g.status = 'partial'; // Todos finalizados, mas misto
-                else g.status = 'pending'; // AINDA TEM ITEM PENDENTE, ENTÃO O GRUPO É PENDENTE
-
+                else if (s+f > 0) g.status = 'partial';
+                else g.status = 'pending';
                 ordered.push(g);
                 seen.add(key);
             }
@@ -106,9 +103,6 @@ export default function App() {
   const [newRouteDate, setNewRouteDate] = useState(new Date().toISOString().split('T')[0]);
   const [newRouteValue, setNewRouteValue] = useState('');
 
-  // FILTRO DASHBOARD (ITEM 3)
-  const [dashFilter, setDashFilter] = useState('all'); // all, today, month
-
   const [tempStops, setTempStops] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
   const [userPos, setUserPos] = useState(null);
@@ -118,6 +112,7 @@ export default function App() {
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
   
+  // FIX: Inicializar com valores seguros
   const [realMetrics, setRealMetrics] = useState({ dist: '0 km', time: '0 min' });
 
   const [isReordering, setIsReordering] = useState(false);
@@ -125,28 +120,19 @@ export default function App() {
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
-  // DASHBOARD CALCULATION COM FILTROS (ITEM 3)
+  // DASHBOARD CALCULATION
   const dashboardStats = useMemo(() => {
-      let filteredRoutes = routes;
-      const today = new Date().toISOString().split('T')[0];
-      const currentMonth = today.substring(0, 7);
-
-      if (dashFilter === 'today') {
-          filteredRoutes = routes.filter(r => r.date === today);
-      } else if (dashFilter === 'month') {
-          filteredRoutes = routes.filter(r => r.date.startsWith(currentMonth));
-      }
-
       let totalMoney = 0;
       let totalStops = 0;
       let totalSuccess = 0;
       
-      const graphDataRaw = filteredRoutes.slice(0, 10).map(r => ({
+      // Dados para o Gráfico (Últimos 7 dias ou rotas)
+      const graphDataRaw = routes.slice(0, 7).map(r => ({
           name: new Date(r.date).toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'}),
           valor: parseFloat(r.value || 0)
       })).reverse();
 
-      filteredRoutes.forEach(r => {
+      routes.forEach(r => {
           const val = parseFloat(r.value);
           if (!isNaN(val)) totalMoney += val;
           
@@ -157,17 +143,16 @@ export default function App() {
       });
       
       const successRate = totalStops > 0 ? Math.round((totalSuccess / totalStops) * 100) : 0;
-      const avgRoute = filteredRoutes.length > 0 ? (totalMoney / filteredRoutes.length).toFixed(2) : "0.00";
+      const avgRoute = routes.length > 0 ? (totalMoney / routes.length).toFixed(2) : "0.00";
 
       return {
           totalMoney: totalMoney.toFixed(2),
           totalSuccess,
           successRate,
           avgRoute,
-          graphData: graphDataRaw,
-          routeCount: filteredRoutes.length
+          graphData: graphDataRaw
       };
-  }, [routes, dashFilter]);
+  }, [routes]);
 
   useEffect(() => {
     try {
@@ -325,10 +310,10 @@ export default function App() {
   };
 
   const startReorderMode = () => {
-      handleToggleMap(); 
+      if (!showMap) setShowMap(true); // Garante que abre
       setIsReordering(true);
       setReorderList([]); 
-      showToast("Toque nos pinos na ordem desejada!", "info");
+      showToast("Selecione os pinos na ordem correta", "info");
   };
 
   const handleMapMarkerClick = (groupId) => {
@@ -344,6 +329,7 @@ export default function App() {
 
   const saveReorder = () => {
       if (!isReordering) return;
+      
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
@@ -374,7 +360,6 @@ export default function App() {
   const cancelReorder = () => {
       setIsReordering(false);
       setReorderList([]);
-      setShowMap(false);
   };
 
   const setStatus = (stopId, status) => {
@@ -422,7 +407,7 @@ export default function App() {
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
-  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial'); // Item 1: 'partial' agora é considerado ativo/next
+  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
@@ -434,6 +419,7 @@ export default function App() {
           }, (res, status) => {
               if (status === 'OK') {
                   setDirectionsResponse(res);
+                  // Atualiza métricas reais
                   const route = res.routes[0];
                   let totalDist = 0;
                   let totalDur = 0;
@@ -452,28 +438,22 @@ export default function App() {
           });
       } else {
           setDirectionsResponse(null);
-          setRealMetrics({ dist: '0 km', time: '0 min' });
       }
   }, [nextGroup?.id, userPos, isLoaded]);
 
-  // --- DASHBOARD VIEW (FILTROS ADICIONADOS) ---
+  // --- ITEM 3: PADDING NO TOPO ---
+  const SAFE_TOP = "pt-12"; 
+
+  // --- DASHBOARD VIEW ---
   if (view === 'dashboard') return (
-      <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
+      <div className={`min-h-screen bg-slate-50 flex flex-col ${SAFE_TOP}`}>
           <div className="bg-white p-6 shadow-sm z-10">
               <button onClick={() => setView('home')} className="mb-4 text-slate-400 hover:text-slate-600"><ArrowLeft/></button>
-              <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-2xl font-bold text-slate-900">Financeiro</h2>
-                  
-                  {/* FILTROS DE DATA (ITEM 3) */}
-                  <div className="flex bg-slate-100 rounded-lg p-1">
-                      <button onClick={() => setDashFilter('all')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${dashFilter==='all' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>Todos</button>
-                      <button onClick={() => setDashFilter('month')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${dashFilter==='month' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>Mês</button>
-                      <button onClick={() => setDashFilter('today')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${dashFilter==='today' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>Hoje</button>
-                  </div>
-              </div>
+              <h2 className="text-2xl font-bold text-slate-900">Financeiro</h2>
+              <p className="text-sm text-slate-500">Resumo geral das entregas</p>
           </div>
 
-          <div className="flex-1 p-6 space-y-4 overflow-y-auto">
+          <div className="flex-1 p-6 space-y-6 overflow-y-auto">
               
               <div className="grid grid-cols-2 gap-4">
                   <div className="bg-blue-600 p-5 rounded-2xl shadow-lg text-white">
@@ -494,30 +474,28 @@ export default function App() {
                   </div>
               </div>
 
-              {/* GRÁFICO BARRAS */}
-              {dashboardStats.graphData.length > 0 && (
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 h-64">
-                      <h3 className="text-sm font-bold text-slate-500 mb-4 uppercase">Histórico Recente</h3>
-                      <ResponsiveContainer width="100%" height="80%">
-                          <BarChart data={dashboardStats.graphData}>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0"/>
-                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8'}} dy={10}/>
-                              <Tooltip 
-                                cursor={{fill: '#F1F5F9'}}
-                                contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
-                              />
-                              <Bar dataKey="valor" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={20}/>
-                          </BarChart>
-                      </ResponsiveContainer>
-                  </div>
-              )}
+              {/* GRÁFICO (FASE 2) */}
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 h-64">
+                  <h3 className="text-sm font-bold text-slate-500 mb-4 uppercase">Histórico Recente</h3>
+                  <ResponsiveContainer width="100%" height="80%">
+                      <BarChart data={dashboardStats.graphData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0"/>
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8'}} dy={10}/>
+                          <Tooltip 
+                            cursor={{fill: '#F1F5F9'}}
+                            contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
+                          />
+                          <Bar dataKey="valor" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={20}/>
+                      </BarChart>
+                  </ResponsiveContainer>
+              </div>
 
           </div>
       </div>
   );
 
   if (view === 'home') return (
-      <div className="min-h-screen pb-24 px-6 pt-12 bg-slate-100">
+      <div className={`min-h-screen pb-24 px-6 ${SAFE_TOP} bg-slate-100`}>
           <div className="flex justify-between items-center mb-8">
               <div>
                   <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Minhas Rotas</h1>
@@ -525,6 +503,7 @@ export default function App() {
               </div>
               <div className="flex gap-2">
                   <button onClick={() => setView('dashboard')} className="bg-white p-3 rounded-2xl shadow-sm text-slate-600 hover:text-blue-600 transition"><LayoutDashboard size={24}/></button>
+                  {/* ITEM 4: REMOVIDO BOTÃO DE CAIXA INÚTIL */}
               </div>
           </div>
           {routes.length === 0 ? (
@@ -535,8 +514,8 @@ export default function App() {
           ) : (
               <div className="space-y-5">
                   {routes.map(r => {
-                      const done = r.stops.filter(s => s.status === 'success').length;
                       const percent = calculateProgressPercent(r.stops);
+                      const done = r.stops.filter(s => s.status === 'success').length;
                       
                       return (
                           <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 active:scale-[0.98] transition-transform duration-200">
@@ -574,7 +553,7 @@ export default function App() {
   );
 
   if (view === 'create') return (
-      <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
+      <div className={`min-h-screen bg-slate-50 flex flex-col ${SAFE_TOP}`}>
           <div className="bg-white p-6 pb-4 shadow-sm z-10">
               <button onClick={() => setView('home')} className="mb-4 text-slate-400 hover:text-slate-600"><ArrowLeft/></button>
               <h2 className="text-2xl font-bold text-slate-900">Nova Rota</h2>
@@ -606,7 +585,7 @@ export default function App() {
   );
 
   return (
-      <div className="flex flex-col h-screen bg-slate-50 relative pt-12">
+      <div className={`flex flex-col h-screen bg-slate-50 relative ${SAFE_TOP}`}>
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
           {isReordering && (
@@ -686,6 +665,7 @@ export default function App() {
                   expandedGroups={expandedGroups}
                   toggleGroup={toggleGroup}
                   setStatus={setStatus}
+                  onStartReorder={startReorderMode}
                   onEditAddress={updateAddress}
               />
           )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Package, Map as MapIcon } from 'lucide-react';
+import { Check, ChevronUp, ChevronDown, Layers, Package, Map as MapIcon, AlertCircle } from 'lucide-react';
 
 export default function RouteList(props) {
     const { 
@@ -10,8 +10,7 @@ export default function RouteList(props) {
         expandedGroups = {}, 
         toggleGroup, 
         setStatus,
-        onStartReorder,
-        onEditAddress
+        onStartReorder
     } = props;
 
     const safeStr = (val) => val ? String(val).trim() : '';
@@ -30,8 +29,6 @@ export default function RouteList(props) {
     return (
         <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 relative bg-slate-50">
             
-            {/* REMOVIDO: Botão Editar Sequência daqui (agora só no mapa) */}
-
             {!searchQuery && nextGroup && (
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
@@ -61,8 +58,12 @@ export default function RouteList(props) {
                                     </div>
                                     <p className="text-xs font-medium text-slate-600 mb-3 ml-6">{item.address}</p>
                                     <div className="flex gap-2">
-                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-3 bg-white border border-red-100 text-red-500 rounded-lg text-[10px] font-bold uppercase shadow-sm">Falha</button>
-                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-[2] py-3 bg-green-500 text-white rounded-lg text-[10px] font-bold uppercase shadow-md active:scale-95 transition">Entregue</button>
+                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-3 bg-white border border-red-100 text-red-500 rounded-lg text-[10px] font-bold uppercase shadow-sm flex items-center justify-center gap-1">
+                                            <AlertCircle size={12}/> Ocorrência
+                                        </button>
+                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-[2] py-3 bg-green-500 text-white rounded-lg text-[10px] font-bold uppercase shadow-md active:scale-95 transition">
+                                            Entregue
+                                        </button>
                                     </div>
                                 </div>
                             )
@@ -77,10 +78,10 @@ export default function RouteList(props) {
             
             {filteredGroups.map((group, idx) => (
                 (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
-                    <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
+                    <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : group.status === 'failed' ? 'border-red-400 opacity-60' : 'border-slate-300'}`}>
                         <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : group.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
+                                {group.status === 'success' ? <Check size={14}/> : group.status === 'failed' ? <AlertCircle size={14}/> : (idx + 1)}
                             </div>
 
                             <div className="flex-1 min-w-0">
@@ -102,16 +103,17 @@ export default function RouteList(props) {
                                                 <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
                                                 <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
                                             </div>
-                                            {/* REMOVIDO: Botão Lápis */}
                                         </div>
                                         {item.status === 'pending' ? (
                                             <div className="flex gap-2 w-full">
-                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase">Falha</button>
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase flex items-center justify-center gap-1">
+                                                    <AlertCircle size={12}/> Ocorrência
+                                                </button>
                                                 <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm">Entregue</button>
                                             </div>
                                         ) : (
                                             <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
-                                                {item.status === 'success' ? 'ENTREGUE' : 'NÃO ENTREGUE'}
+                                                {item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}
                                             </span>
                                         )}
                                     </div>
