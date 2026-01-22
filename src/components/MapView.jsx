@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
-import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, CheckSquare } from 'lucide-react';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, Undo2 } from 'lucide-react';
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 const mapOptions = {
@@ -13,15 +13,16 @@ const getMarkerIcon = (status, isCurrent, isReordering, reorderIndex) => {
     let fillColor = "#3B82F6"; // Azul Padrão
     let scale = 1.6;
     let strokeColor = "#FFFFFF";
+    let labelColor = "white";
 
     if (isReordering) {
         // Modo Reordenação
         if (reorderIndex !== -1) {
-            fillColor = "#10B981"; // Verde (Já selecionado na nova ordem)
+            fillColor = "#10B981"; // Verde (Já selecionado)
             scale = 1.8;
             strokeColor = "#000000";
         } else {
-            fillColor = "#94A3B8"; // Cinza (Ainda não selecionado)
+            fillColor = "#94A3B8"; // Cinza (Pendente)
         }
     } else {
         // Modo Normal
@@ -53,10 +54,10 @@ export default function MapView({
     openNav,
     isLoaded,
     setStatus,
-    setAllStatus, // Nova prop para entregar todos
-    isReordering, // Estado de reordenação
-    reorderList, // Lista temporária de IDs reordenados
-    onMarkerClick // Função de clique (muda comportamento se estiver reordenando)
+    setAllStatus,
+    isReordering, 
+    reorderList, 
+    onMarkerClick 
 }) {
     const [selectedMarker, setSelectedMarker] = useState(null);
     const [mapInstance, setMapInstance] = useState(null);
@@ -79,7 +80,6 @@ export default function MapView({
             options={mapOptions}
             onLoad={setMapInstance}
         >
-            {/* Esconde a linha azul se estiver reordenando para limpar a visão */}
             {!isReordering && directionsResponse && (
                 <DirectionsRenderer 
                     directions={directionsResponse} 
@@ -91,15 +91,21 @@ export default function MapView({
             )}
             
             {groupedStops.map((g) => {
-                // Lógica do Label (Número do Pino)
-                let labelText = String(g.displayOrder);
-                
+                // LÓGICA DE LABEL (NÚMERO NO PINO)
+                let labelText = ""; 
+
                 if (isReordering) {
+                    // No modo reordenação, mostra a NOVA sequência (1, 2, 3...)
                     const newIndex = reorderList.indexOf(g.id);
                     if (newIndex !== -1) {
-                        labelText = String(newIndex + 1); // Novo número na sequência
-                    } else {
-                        labelText = "?"; // Pendente de clique
+                        labelText = String(newIndex + 1); 
+                    }
+                    // Se não selecionado, fica sem número ou "?"
+                } else {
+                    // No modo normal, mostra o NÚMERO ORIGINAL DA PLANILHA (Item 1 e 2)
+                    // Se g.displayOrder for null/undefined (planilha sem coluna stop), não mostra nada
+                    if (g.displayOrder) {
+                        labelText = String(g.displayOrder);
                     }
                 }
 
@@ -107,7 +113,7 @@ export default function MapView({
                     <MarkerF 
                         key={g.id} 
                         position={{ lat: g.lat, lng: g.lng }}
-                        label={{ text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" }}
+                        label={labelText ? { text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" } : null}
                         icon={getMarkerIcon(
                             g.status, 
                             !isReordering && nextGroup && g.id === nextGroup.id,
@@ -135,7 +141,7 @@ export default function MapView({
                 />
             )}
 
-            {/* JANELA DE INFORMAÇÃO (SÓ APARECE NO MODO NORMAL) */}
+            {/* JANELA DE INFORMAÇÃO */}
             {selectedMarker && !isReordering && (
                 <InfoWindowF 
                     position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
@@ -145,12 +151,14 @@ export default function MapView({
                         <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
                             <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
                             <div>
-                                <h3 className="font-bold text-sm text-slate-800 leading-tight">Parada: {selectedMarker.displayOrder}</h3>
-                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.items.length} volumes</p>
+                                <h3 className="font-bold text-sm text-slate-800 leading-tight">
+                                    {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem Número'}
+                                </h3>
+                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
                             </div>
                         </div>
                         
-                        {/* BOTÃO ENTREGAR TODOS (Item 1) */}
+                        {/* BOTÃO ENTREGAR TODOS */}
                         {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
                             <button 
                                 onClick={() => {

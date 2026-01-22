@@ -10,7 +10,7 @@ export default function RouteList(props) {
         expandedGroups = {}, 
         toggleGroup, 
         setStatus,
-        onStartReorder, // Mudou: Agora inicia o modo mapa
+        onStartReorder,
         onEditAddress
     } = props;
 
@@ -22,9 +22,11 @@ export default function RouteList(props) {
         });
     };
 
+    // --- CORREÇÃO ITEM 4: Texto preenchido ---
     const handleEditAddressClick = (e, item) => {
         e.stopPropagation();
-        const newAddr = prompt("Editar Endereço:", item.address); 
+        const currentVal = item.address || ""; 
+        const newAddr = prompt("Editar Endereço:", currentVal); 
         if (newAddr && newAddr.trim() !== "") {
             onEditAddress(item.id, newAddr);
         }
@@ -40,7 +42,6 @@ export default function RouteList(props) {
             
             {!searchQuery && (
                 <div className="flex justify-end mb-2">
-                    {/* Item 2: Botão de Editar agora chama o mapa */}
                     <button 
                         onClick={onStartReorder} 
                         className="text-[10px] font-bold px-3 py-2 rounded-full flex items-center gap-2 transition uppercase tracking-wider bg-slate-900 text-white shadow-lg active:scale-95"
@@ -54,7 +55,8 @@ export default function RouteList(props) {
                 <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-6">
                     <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
                     <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
-                       Parada: {nextGroup.displayOrder}
+                       {/* Item 1: Título fixo */}
+                       {nextGroup.displayOrder ? `Parada ${nextGroup.displayOrder}` : 'Parada (Sem Nº)'}
                     </h3>
                     <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
                     
@@ -99,12 +101,14 @@ export default function RouteList(props) {
                     <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
                         <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                {group.status === 'success' ? <Check size={14}/> : group.displayOrder}
+                                {group.status === 'success' ? <Check size={14}/> : (group.displayOrder || '-')}
                             </div>
 
                             <div className="flex-1 min-w-0">
-                                {/* Item 3: Titulo Parada: X */}
-                                <h4 className="font-bold text-slate-800 text-sm truncate">Parada: {group.displayOrder}</h4>
+                                {/* Item 1: Título fixo */}
+                                <h4 className="font-bold text-slate-800 text-sm truncate">
+                                    {group.displayOrder ? `Parada: ${group.displayOrder}` : group.mainName}
+                                </h4>
                                 <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
                             </div>
                             
