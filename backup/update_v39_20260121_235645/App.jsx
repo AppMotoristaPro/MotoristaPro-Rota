@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, Filter, AlertCircle, Fuel, Timer, Calculator, Save
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, Filter, AlertCircle
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
-const DB_KEY = 'mp_db_v70_finance_pro';
+const DB_KEY = 'mp_db_v69_financial';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
 const safeStr = (val) => {
@@ -66,14 +66,15 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if (g) {
+                // CORREÇÃO LOGICA V38 (ITEM 1): PRIORIDADE AO PENDENTE
                 const t = g.items.length;
                 const s = g.items.filter(i => i.status === 'success').length;
                 const f = g.items.filter(i => i.status === 'failed').length;
                 
                 if (s === t) g.status = 'success';
                 else if (f === t) g.status = 'failed';
-                else if (s + f === t) g.status = 'partial';
-                else g.status = 'pending';
+                else if (s + f === t) g.status = 'partial'; // Todos finalizados, mas misto
+                else g.status = 'pending'; // AINDA TEM ITEM PENDENTE, ENTÃO O GRUPO É PENDENTE
 
                 ordered.push(g);
                 seen.add(key);
@@ -105,13 +106,8 @@ export default function App() {
   const [newRouteDate, setNewRouteDate] = useState(new Date().toISOString().split('T')[0]);
   const [newRouteValue, setNewRouteValue] = useState('');
 
-  // ESTADOS DO FILTRO FINANCEIRO
-  const [dashFilterType, setDashFilterType] = useState('month'); // 'all', 'month', 'week', 'day'
-  const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM default
-
-  // ESTADOS DO MODAL DE FINALIZAÇÃO
-  const [showFinishModal, setShowFinishModal] = useState(false);
-  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '' });
+  // FILTRO DASHBOARD (ITEM 3)
+  const [dashFilter, setDashFilter] = useState('all'); // all, today, month
 
   const [tempStops, setTempStops] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
@@ -129,79 +125,49 @@ export default function App() {
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
-  // --- 1. DASHBOARD INTELIGENTE (ITEM 1, 2, 4) ---
+  // DASHBOARD CALCULATION COM FILTROS (ITEM 3)
   const dashboardStats = useMemo(() => {
-      let filtered = routes;
+      let filteredRoutes = routes;
+      const today = new Date().toISOString().split('T')[0];
+      const currentMonth = today.substring(0, 7);
 
-      // Lógica de Filtro (Item 2)
-      if (dashFilterType === 'month' && dashFilterValue) {
-          filtered = routes.filter(r => r.date.startsWith(dashFilterValue));
-      } else if (dashFilterType === 'day' && dashFilterValue) {
-          filtered = routes.filter(r => r.date === dashFilterValue);
-      } else if (dashFilterType === 'week' && dashFilterValue) {
-           // Lógica simplificada de semana (pega a string 2024-W32)
-           // Para simplificar no React sem libs pesadas, vamos filtrar os últimos 7 dias da data selecionada se fosse date, 
-           // mas input type week retorna "2024-W01".
-           // Vamos fazer um filtro simples: se o input type week estiver setado.
-           // (Implementação robusta de semana requer momentjs ou similar, aqui faremos string compare simples ou 'all' fallback por enquanto)
-           // Para não complicar, se for semana, mostra tudo (TODO: refinar logica de semana)
-           filtered = routes; 
+      if (dashFilter === 'today') {
+          filteredRoutes = routes.filter(r => r.date === today);
+      } else if (dashFilter === 'month') {
+          filteredRoutes = routes.filter(r => r.date.startsWith(currentMonth));
       }
 
-      // Ordenação Cronológica (Item 1: Antigo -> Novo na Direita)
-      filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      let totalRevenue = 0;
-      let totalExpenses = 0;
-      let totalKmDriven = 0;
-      let totalHours = 0;
-      let totalSuccess = 0;
+      let totalMoney = 0;
       let totalStops = 0;
+      let totalSuccess = 0;
+      
+      const graphDataRaw = filteredRoutes.slice(0, 10).map(r => ({
+          name: new Date(r.date).toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'}),
+          valor: parseFloat(r.value || 0)
+      })).reverse();
 
-      const graphData = filtered.map(r => {
-          const val = parseFloat(r.value || 0);
-          const exp = parseFloat(r.expenses || 0);
-          const km = parseFloat(r.realKm || 0);
-          const hrs = parseFloat(r.hours || 0);
-
-          totalRevenue += val;
-          totalExpenses += exp;
-          totalKmDriven += km;
-          totalHours += hrs;
-
+      filteredRoutes.forEach(r => {
+          const val = parseFloat(r.value);
+          if (!isNaN(val)) totalMoney += val;
+          
           if (r.stops) {
               totalStops += r.stops.length;
               totalSuccess += r.stops.filter(s => s.status === 'success').length;
           }
-
-          return {
-              date: new Date(r.date).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}),
-              faturamento: val,
-              lucro: val - exp
-          };
       });
-
-      const netProfit = totalRevenue - totalExpenses;
-      const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0;
-      const earningsPerKm = totalKmDriven > 0 ? (totalRevenue / totalKmDriven).toFixed(2) : "0.00";
-      const earningsPerHour = totalHours > 0 ? (totalRevenue / totalHours).toFixed(2) : "0.00";
-      const avgRoute = filtered.length > 0 ? (totalRevenue / filtered.length).toFixed(2) : "0.00";
+      
       const successRate = totalStops > 0 ? Math.round((totalSuccess / totalStops) * 100) : 0;
+      const avgRoute = filteredRoutes.length > 0 ? (totalMoney / filteredRoutes.length).toFixed(2) : "0.00";
 
       return {
-          totalRevenue: totalRevenue.toFixed(2),
-          totalExpenses: totalExpenses.toFixed(2),
-          netProfit: netProfit.toFixed(2),
-          profitMargin,
-          earningsPerKm,
-          earningsPerHour,
-          avgRoute,
-          successRate,
+          totalMoney: totalMoney.toFixed(2),
           totalSuccess,
-          graphData,
-          count: filtered.length
+          successRate,
+          avgRoute,
+          graphData: graphDataRaw,
+          routeCount: filteredRoutes.length
       };
-  }, [routes, dashFilterType, dashFilterValue]);
+  }, [routes, dashFilter]);
 
   useEffect(() => {
     try {
@@ -301,10 +267,7 @@ export default function App() {
           date: newRouteDate, 
           value: newRouteValue, 
           stops: tempStops, 
-          optimized: true,
-          expenses: 0, // Novo campo
-          realKm: 0,   // Novo campo
-          hours: 0     // Novo campo
+          optimized: true 
       }, ...routes]);
       
       setNewRouteName(''); 
@@ -335,39 +298,6 @@ export default function App() {
           setRoutes(updated);
           showToast("Rota reiniciada!", "info");
       }
-  };
-
-  // --- ITEM 3: FINALIZAR ROTA COM RELATÓRIO ---
-  const openFinishModal = () => {
-      setShowFinishModal(true);
-      // Preenche com valores atuais se já existirem
-      const r = routes.find(ro => ro.id === activeRouteId);
-      if (r) {
-          setFinishData({
-              km: r.realKm || '',
-              hours: r.hours || '',
-              expenses: r.expenses || ''
-          });
-      }
-  };
-
-  const saveFinishData = () => {
-      const rIdx = routes.findIndex(r => r.id === activeRouteId);
-      if (rIdx === -1) return;
-
-      const updated = [...routes];
-      updated[rIdx] = {
-          ...updated[rIdx],
-          realKm: finishData.km,
-          hours: finishData.hours,
-          expenses: finishData.expenses,
-          isFinished: true // Marca flag
-      };
-
-      setRoutes(updated);
-      setShowFinishModal(false);
-      showToast("Rota Finalizada e Dados Salvos!", "success");
-      setView('home'); // Volta pra home com sensação de dever cumprido
   };
 
   const updateAddress = async (stopId, newAddress) => {
@@ -492,11 +422,8 @@ export default function App() {
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
-  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
+  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial'); // Item 1: 'partial' agora é considerado ativo/next
   
-  // Verifica se está 100% concluído para mostrar botão de finalizar
-  const isRouteComplete = activeRoute && !nextGroup;
-
   useEffect(() => {
       if (isLoaded && nextGroup && userPos) {
           const service = new window.google.maps.DirectionsService();
@@ -529,81 +456,62 @@ export default function App() {
       }
   }, [nextGroup?.id, userPos, isLoaded]);
 
-  // --- DASHBOARD VIEW (FILTROS DINÂMICOS) ---
+  // --- DASHBOARD VIEW (FILTROS ADICIONADOS) ---
   if (view === 'dashboard') return (
       <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
           <div className="bg-white p-6 shadow-sm z-10">
               <button onClick={() => setView('home')} className="mb-4 text-slate-400 hover:text-slate-600"><ArrowLeft/></button>
-              <h2 className="text-2xl font-bold text-slate-900">Financeiro</h2>
-              <p className="text-sm text-slate-500">Gestão de Ganhos e Custos</p>
-              
-              {/* FILTROS INTELIGENTES */}
-              <div className="flex gap-2 mt-4 items-center overflow-x-auto pb-2">
-                  <button onClick={() => setDashFilterType('all')} className={`px-4 py-2 rounded-full text-xs font-bold transition whitespace-nowrap ${dashFilterType==='all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      Geral
-                  </button>
-                  <button onClick={() => {setDashFilterType('month'); setDashFilterValue(new Date().toISOString().slice(0, 7))}} className={`px-4 py-2 rounded-full text-xs font-bold transition whitespace-nowrap ${dashFilterType==='month' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      Mês
-                  </button>
-                  <button onClick={() => {setDashFilterType('day'); setDashFilterValue(new Date().toISOString().split('T')[0])}} className={`px-4 py-2 rounded-full text-xs font-bold transition whitespace-nowrap ${dashFilterType==='day' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      Dia
-                  </button>
+              <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-2xl font-bold text-slate-900">Financeiro</h2>
                   
-                  {/* INPUT CONDICIONAL DE DATA */}
-                  {dashFilterType === 'month' && (
-                      <input type="month" className="bg-slate-100 rounded-lg px-2 py-1 text-xs border border-slate-200 outline-none" value={dashFilterValue} onChange={e => setDashFilterValue(e.target.value)} />
-                  )}
-                  {dashFilterType === 'day' && (
-                      <input type="date" className="bg-slate-100 rounded-lg px-2 py-1 text-xs border border-slate-200 outline-none" value={dashFilterValue} onChange={e => setDashFilterValue(e.target.value)} />
-                  )}
+                  {/* FILTROS DE DATA (ITEM 3) */}
+                  <div className="flex bg-slate-100 rounded-lg p-1">
+                      <button onClick={() => setDashFilter('all')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${dashFilter==='all' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>Todos</button>
+                      <button onClick={() => setDashFilter('month')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${dashFilter==='month' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>Mês</button>
+                      <button onClick={() => setDashFilter('today')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${dashFilter==='today' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>Hoje</button>
+                  </div>
               </div>
           </div>
 
           <div className="flex-1 p-6 space-y-4 overflow-y-auto">
               
-              {/* CARDS INTELIGENTES (ITEM 4) */}
               <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-900 p-4 rounded-2xl shadow-lg text-white col-span-2">
-                      <div className="flex items-center gap-2 opacity-80 mb-1"><DollarSign size={16}/><span className="text-xs font-bold uppercase">Lucro Líquido</span></div>
-                      <div className="text-3xl font-bold">R$ {dashboardStats.netProfit}</div>
-                      <div className="text-[10px] opacity-60 mt-1">Margem: {dashboardStats.profitMargin}% (Rec: {dashboardStats.totalRevenue} - Desp: {dashboardStats.totalExpenses})</div>
+                  <div className="bg-blue-600 p-5 rounded-2xl shadow-lg text-white">
+                      <div className="flex items-center gap-2 opacity-80 mb-1"><DollarSign size={16}/><span className="text-xs font-bold uppercase">Faturamento</span></div>
+                      <div className="text-2xl font-bold">R$ {dashboardStats.totalMoney}</div>
                   </div>
-
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-1"><MapPin size={16}/><span className="text-xs font-bold uppercase">R$ / Km</span></div>
-                      <div className="text-xl font-bold text-blue-600">R$ {dashboardStats.earningsPerKm}</div>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-1"><Clock size={16}/><span className="text-xs font-bold uppercase">R$ / Hora</span></div>
-                      <div className="text-xl font-bold text-green-600">R$ {dashboardStats.earningsPerHour}</div>
-                  </div>
-                  
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                       <div className="flex items-center gap-2 text-slate-400 mb-1"><Check size={16}/><span className="text-xs font-bold uppercase">Entregues</span></div>
-                      <div className="text-xl font-bold text-slate-800">{dashboardStats.totalSuccess}</div>
+                      <div className="text-2xl font-bold text-slate-800">{dashboardStats.totalSuccess}</div>
                   </div>
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                       <div className="flex items-center gap-2 text-slate-400 mb-1"><TrendingUp size={16}/><span className="text-xs font-bold uppercase">Sucesso</span></div>
-                      <div className="text-xl font-bold text-slate-800">{dashboardStats.successRate}%</div>
+                      <div className="text-2xl font-bold text-green-600">{dashboardStats.successRate}%</div>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                      <div className="flex items-center gap-2 text-slate-400 mb-1"><Briefcase size={16}/><span className="text-xs font-bold uppercase">Média / Rota</span></div>
+                      <div className="text-xl font-bold text-slate-800">R$ {dashboardStats.avgRoute}</div>
                   </div>
               </div>
 
-              {/* GRÁFICO (ORDEM CORRIGIDA) */}
+              {/* GRÁFICO BARRAS */}
               {dashboardStats.graphData.length > 0 && (
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 h-72">
-                      <h3 className="text-xs font-bold text-slate-500 mb-4 uppercase flex items-center gap-2"><LayoutDashboard size={14}/> Performance Recente</h3>
-                      <ResponsiveContainer width="100%" height="85%">
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 h-64">
+                      <h3 className="text-sm font-bold text-slate-500 mb-4 uppercase">Histórico Recente</h3>
+                      <ResponsiveContainer width="100%" height="80%">
                           <BarChart data={dashboardStats.graphData}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0"/>
-                              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8'}} dy={10}/>
-                              <Tooltip cursor={{fill: '#F8FAFC'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}/>
-                              <Legend iconType="circle" wrapperStyle={{fontSize:'10px', paddingTop:'10px'}}/>
-                              <Bar name="Faturamento" dataKey="faturamento" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={12}/>
-                              <Bar name="Lucro Real" dataKey="lucro" fill="#10B981" radius={[4, 4, 0, 0]} barSize={12}/>
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8'}} dy={10}/>
+                              <Tooltip 
+                                cursor={{fill: '#F1F5F9'}}
+                                contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
+                              />
+                              <Bar dataKey="valor" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={20}/>
                           </BarChart>
                       </ResponsiveContainer>
                   </div>
               )}
+
           </div>
       </div>
   );
@@ -698,55 +606,9 @@ export default function App() {
   );
 
   return (
-      <div className="flex flex-col h-screen bg-slate-50 relative">
+      <div className="flex flex-col h-screen bg-slate-50 relative pt-12">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
-          {/* MODAL DE FINALIZAÇÃO DA ROTA (ITEM 3) */}
-          {showFinishModal && (
-              <div className="absolute inset-0 z-[3000] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-                  <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10">
-                      <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900">
-                            <CheckCircle size={24} className="text-green-500"/> Finalizar Rota
-                        </h3>
-                        <button onClick={() => setShowFinishModal(false)} className="text-slate-400 bg-slate-100 p-2 rounded-full"><X size={20}/></button>
-                      </div>
-                      
-                      <div className="space-y-4 mb-8">
-                          <div>
-                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">KM Final (Rodados)</label>
-                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition">
-                                  <MapPin className="text-slate-400 mr-3" size={20}/>
-                                  <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.km} onChange={e => setFinishData({...finishData, km: e.target.value})}/>
-                                  <span className="text-sm font-bold text-slate-400">km</span>
-                              </div>
-                          </div>
-
-                          <div className="flex gap-4">
-                              <div className="flex-1">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Horas</label>
-                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 transition">
-                                      <Timer className="text-slate-400 mr-2" size={20}/>
-                                      <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.hours} onChange={e => setFinishData({...finishData, hours: e.target.value})}/>
-                                  </div>
-                              </div>
-                              <div className="flex-1">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Gastos (R$)</label>
-                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 transition">
-                                      <Fuel className="text-slate-400 mr-2" size={20}/>
-                                      <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.expenses} onChange={e => setFinishData({...finishData, expenses: e.target.value})}/>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-
-                      <button onClick={saveFinishData} className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-amber-200 active:scale-95 transition flex items-center justify-center gap-2">
-                          <Save size={20}/> Confirmar & Relatar
-                      </button>
-                  </div>
-              </div>
-          )}
-
           {isReordering && (
               <div className="absolute bottom-0 left-0 right-0 bg-yellow-400 px-4 py-3 z-50 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.1)] rounded-t-2xl animate-in slide-in-from-bottom-4">
                   <div className="flex flex-col">
@@ -824,18 +686,8 @@ export default function App() {
                   expandedGroups={expandedGroups}
                   toggleGroup={toggleGroup}
                   setStatus={setStatus}
-                  onStartReorder={startReorderMode}
                   onEditAddress={updateAddress}
               />
-          )}
-
-          {/* BOTÃO FLUTUANTE DE FINALIZAR ROTA (APENAS SE 100% COMPLETO) */}
-          {!showMap && isRouteComplete && !activeRoute.isFinished && (
-              <div className="fixed bottom-6 left-6 right-6 animate-in slide-in-from-bottom-10">
-                   <button onClick={openFinishModal} className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white py-4 rounded-2xl font-extrabold text-lg shadow-2xl shadow-orange-300 flex items-center justify-center gap-2">
-                       <CheckCircle size={24}/> FINALIZAR & RELATAR
-                   </button>
-              </div>
           )}
       </div>
   );
