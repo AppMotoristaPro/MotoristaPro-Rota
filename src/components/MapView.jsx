@@ -87,20 +87,27 @@ export default function MapView({
                 />
             )}
             
-            {groupedStops.map((g, idx) => {
-                // LÓGICA ITEM 1: Pino mostra a ORDEM DE VISITA (Index + 1) ou a nova ordem se editando
-                let labelText = String(idx + 1); 
+            {groupedStops.map((g) => {
+                // LÓGICA DE LABEL CORRIGIDA (ITEM 2)
+                let labelText = null; 
 
                 if (isReordering) {
                     const newIndex = reorderList.indexOf(g.id);
-                    labelText = (newIndex !== -1) ? String(newIndex + 1) : "";
+                    if (newIndex !== -1) {
+                        labelText = String(newIndex + 1); 
+                    }
+                    // Se não selecionado, labelText fica null (sem texto), evitando [object Object]
+                } else {
+                    if (g.displayOrder !== null && g.displayOrder !== undefined) {
+                        labelText = String(g.displayOrder);
+                    }
                 }
 
                 return (
                     <MarkerF 
                         key={g.id} 
                         position={{ lat: g.lat, lng: g.lng }}
-                        label={{ text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" }}
+                        label={labelText ? { text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" } : null}
                         icon={getMarkerIcon(
                             g.status, 
                             !isReordering && nextGroup && g.id === nextGroup.id,
@@ -137,7 +144,6 @@ export default function MapView({
                         <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
                             <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
                             <div>
-                                {/* ITEM 1: Janela mostra o número da PLANILHA (stopId) */}
                                 <h3 className="font-bold text-sm text-slate-800 leading-tight">
                                     {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID Planilha'}
                                 </h3>
