@@ -29,12 +29,13 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
       
-      # REMOVE PLATAFORMA ANTIGA SE EXISTIR
+      # REMOVE PLATAFORMA ANTIGA SE EXISTIR (Limpeza para garantir build fresco)
       - name: Clean Android Platform
         run: rm -rf android
         
+      # FIX: Uso explícito do @capacitor/cli para evitar erro "could not determine executable"
       - name: Add Android Platform
-        run: npx cap add android
+        run: npx @capacitor/cli add android
       
       # INJETAR PERMISSÕES NO ANDROID MANIFEST
       - name: Inject Android Permissions
@@ -43,7 +44,7 @@ jobs:
           cat android/app/src/main/AndroidManifest.xml
         
       - name: Sync Capacitor
-        run: npx cap sync
+        run: npx @capacitor/cli sync
         
       - name: Build APK (Debug)
         working-directory: android
