@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
@@ -14,7 +14,6 @@ import RouteList from './components/RouteList';
 const DB_KEY = 'mp_db_v69_financial';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
-// --- HELPERS ---
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
     if (typeof val === 'object') return JSON.stringify(val);
@@ -96,7 +95,7 @@ const calculateProgressPercent = (stops) => {
 export default function App() {
   const [routes, setRoutes] = useState([]);
   const [activeRouteId, setActiveRouteId] = useState(null);
-  const [view, setView] = useState('home'); // home, details, create, dashboard
+  const [view, setView] = useState('home'); 
   
   const [newRouteName, setNewRouteName] = useState('');
   const [newRouteCompany, setNewRouteCompany] = useState('');
@@ -116,33 +115,6 @@ export default function App() {
   const [reorderList, setReorderList] = useState([]); 
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
-
-  // DASHBOARD CALCULATION
-  const dashboardStats = useMemo(() => {
-      let totalMoney = 0;
-      let totalStops = 0;
-      let totalSuccess = 0;
-      
-      routes.forEach(r => {
-          const val = parseFloat(r.value);
-          if (!isNaN(val)) totalMoney += val;
-          
-          if (r.stops) {
-              totalStops += r.stops.length;
-              totalSuccess += r.stops.filter(s => s.status === 'success').length;
-          }
-      });
-      
-      const successRate = totalStops > 0 ? Math.round((totalSuccess / totalStops) * 100) : 0;
-      const avgRoute = routes.length > 0 ? (totalMoney / routes.length).toFixed(2) : "0.00";
-
-      return {
-          totalMoney: totalMoney.toFixed(2),
-          totalSuccess,
-          successRate,
-          avgRoute
-      };
-  }, [routes]);
 
   useEffect(() => {
     try {
@@ -275,35 +247,12 @@ export default function App() {
       }
   };
 
-  const updateAddress = async (stopId, newAddress) => {
-      const rIdx = routes.findIndex(r => r.id === activeRouteId);
-      if (rIdx === -1) return;
-      const updatedRoutes = [...routes];
-      const stopIndex = updatedRoutes[rIdx].stops.findIndex(s => s.id === stopId);
-      if (stopIndex !== -1) {
-          updatedRoutes[rIdx].stops[stopIndex].address = newAddress;
-          setRoutes(updatedRoutes);
-          try {
-              const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(newAddress)}&key=${GOOGLE_KEY}`);
-              const data = await response.json();
-              if (data.status === 'OK' && data.results.length > 0) {
-                  const loc = data.results[0].geometry.location;
-                  updatedRoutes[rIdx].stops[stopIndex].lat = loc.lat;
-                  updatedRoutes[rIdx].stops[stopIndex].lng = loc.lng;
-                  setRoutes(updatedRoutes); 
-                  showToast("Endereço e Mapa Atualizados!");
-              } else {
-                  showToast("Texto atualizado (Mapa não achou)", "info");
-              }
-          } catch(e) { console.error(e); }
-      }
-  };
-
+  // ITEM 1: Correção - StartReorder apenas seta o estado, não toggle map
   const startReorderMode = () => {
-      handleToggleMap(); 
+      if (!showMap) setShowMap(true); // Garante que abre
       setIsReordering(true);
       setReorderList([]); 
-      showToast("Toque nos pinos na ordem desejada!", "info");
+      showToast("Selecione os pinos na ordem correta", "info");
   };
 
   const handleMapMarkerClick = (groupId) => {
@@ -317,21 +266,27 @@ export default function App() {
       setReorderList(prev => prev.slice(0, -1));
   };
 
+  // ITEM 2: Validation check
   const saveReorder = () => {
       if (!isReordering) return;
+      
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
       const currentStops = [...routes[rIdx].stops];
       const groups = groupStopsByStopName(currentStops);
       
+      // Validação: Tem que selecionar todos
+      if (reorderList.length < groups.length) {
+          const diff = groups.length - reorderList.length;
+          alert(`Você precisa selecionar todas as paradas! Faltam ${diff}.`);
+          return;
+      }
+      
       let newStopsList = [];
       reorderList.forEach(groupId => {
           const group = groups.find(g => g.id === groupId);
           if (group) newStopsList.push(...group.items);
-      });
-      groups.forEach(group => {
-          if (!reorderList.includes(group.id)) newStopsList.push(...group.items);
       });
 
       const updatedRoutes = [...routes];
@@ -346,7 +301,7 @@ export default function App() {
   const cancelReorder = () => {
       setIsReordering(false);
       setReorderList([]);
-      setShowMap(false);
+      // Não fecha o mapa, apenas sai do modo
   };
 
   const setStatus = (stopId, status) => {
@@ -386,11 +341,7 @@ export default function App() {
               setShowMap(false);
           }
       } else {
-          if (view === 'dashboard') {
-              setView('home');
-          } else {
-              setView('home');
-          }
+          setView('home');
       }
   };
 
@@ -415,46 +366,6 @@ export default function App() {
       }
   }, [nextGroup?.id, userPos, isLoaded]);
 
-  // --- DASHBOARD VIEW (NOVO) ---
-  if (view === 'dashboard') return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-          <div className="bg-white p-6 shadow-sm z-10">
-              <button onClick={() => setView('home')} className="mb-4 text-slate-400 hover:text-slate-600"><ArrowLeft/></button>
-              <h2 className="text-2xl font-bold text-slate-900">Financeiro</h2>
-              <p className="text-sm text-slate-500">Resumo geral das entregas</p>
-          </div>
-
-          <div className="flex-1 p-6 space-y-4 overflow-y-auto">
-              
-              <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-blue-600 p-5 rounded-2xl shadow-lg text-white">
-                      <div className="flex items-center gap-2 opacity-80 mb-1"><DollarSign size={16}/><span className="text-xs font-bold uppercase">Faturamento</span></div>
-                      <div className="text-2xl font-bold">R$ {dashboardStats.totalMoney}</div>
-                  </div>
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-1"><Check size={16}/><span className="text-xs font-bold uppercase">Entregues</span></div>
-                      <div className="text-2xl font-bold text-slate-800">{dashboardStats.totalSuccess}</div>
-                  </div>
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-1"><TrendingUp size={16}/><span className="text-xs font-bold uppercase">Sucesso</span></div>
-                      <div className="text-2xl font-bold text-green-600">{dashboardStats.successRate}%</div>
-                  </div>
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-1"><Briefcase size={16}/><span className="text-xs font-bold uppercase">Média / Rota</span></div>
-                      <div className="text-xl font-bold text-slate-800">R$ {dashboardStats.avgRoute}</div>
-                  </div>
-              </div>
-
-              {/* Espaço para gráficos futuros (Phase 2) */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center py-10 opacity-50">
-                  <LayoutDashboard className="mx-auto mb-2 text-slate-300" size={32}/>
-                  <p className="text-xs font-bold text-slate-400 uppercase">Gráficos em Breve</p>
-              </div>
-
-          </div>
-      </div>
-  );
-
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-12 bg-slate-100">
           <div className="flex justify-between items-center mb-8">
@@ -462,10 +373,7 @@ export default function App() {
                   <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Minhas Rotas</h1>
                   <p className="text-slate-500 text-sm mt-1">Gerencie suas entregas</p>
               </div>
-              <div className="flex gap-2">
-                  <button onClick={() => setView('dashboard')} className="bg-white p-3 rounded-2xl shadow-sm text-slate-600 hover:text-blue-600 transition"><LayoutDashboard size={24}/></button>
-                  <div className="bg-white p-3 rounded-2xl shadow-sm"><Package className="text-blue-600"/></div>
-              </div>
+              <div className="bg-white p-3 rounded-2xl shadow-sm"><Package className="text-blue-600"/></div>
           </div>
           {routes.length === 0 ? (
               <div className="text-center mt-32 opacity-40 flex flex-col items-center">
@@ -526,6 +434,7 @@ export default function App() {
                   <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Nome da Rota</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><MapIcon className="text-slate-300 mr-3" size={20}/><input type="text" className="flex-1 outline-none text-sm font-medium" placeholder="Ex: Rota Zona Sul" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/></div></div>
                   <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Empresa</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Building className="text-slate-300 mr-3" size={20}/><input type="text" className="flex-1 outline-none text-sm font-medium" placeholder="Ex: Mercado Livre" value={newRouteCompany} onChange={e => setNewRouteCompany(e.target.value)}/></div></div>
                   
+                  {/* Item 4: Ajuste Grid */}
                   <div className="grid grid-cols-2 gap-4">
                       <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Data</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Calendar className="text-slate-300 mr-3" size={20}/><input type="date" className="flex-1 outline-none text-sm font-medium" value={newRouteDate} onChange={e => setNewRouteDate(e.target.value)}/></div></div>
                       <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Valor (R$)</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><DollarSign className="text-slate-300 mr-1" size={20}/><input type="number" className="flex-1 outline-none text-sm font-medium" placeholder="0,00" value={newRouteValue} onChange={e => setNewRouteValue(e.target.value)}/></div></div>
@@ -549,6 +458,7 @@ export default function App() {
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
+          {/* ITEM 3: BARRA OTIMIZADA */}
           {isReordering && (
               <div className="absolute bottom-0 left-0 right-0 bg-yellow-400 px-4 py-3 z-50 flex items-center justify-between shadow-[0_-4px_10px_rgba(0,0,0,0.1)] rounded-t-2xl animate-in slide-in-from-bottom-4">
                   <div className="flex flex-col">
@@ -565,7 +475,7 @@ export default function App() {
 
           <div className="bg-white px-5 py-4 shadow-sm z-20 sticky top-0">
               <div className="flex items-center justify-between mb-4">
-                  <button onClick={handleBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100"><ArrowLeft className="text-slate-600"/></button>
+                  <button onClick={() => setView('home')}><ArrowLeft/></button>
                   <h2 className="font-bold truncate px-4 flex-1 text-center">{safeStr(activeRoute.name)}</h2>
                   <div className="flex gap-2">
                       <button onClick={resetRoute} className="p-2 rounded-full bg-slate-100 text-slate-600 shadow-sm"><RotateCcw size={20}/></button>
@@ -582,16 +492,6 @@ export default function App() {
                   </div>
               )}
 
-              {activeRoute.optimized && realMetrics && !showMap && (
-                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
-                      <div className="flex items-center gap-2"><MapIcon size={16} className="text-blue-500"/><span className="text-xs font-bold">{realMetrics.dist}</span></div>
-                      <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Clock size={16} className="text-orange-500"/><span className="text-xs font-bold">{realMetrics.time}</span></div>
-                      <div className="w-px h-4 bg-slate-200"></div>
-                      <div className="flex items-center gap-2"><Box size={16} className="text-green-500"/><span className="text-xs font-bold">{activeRoute.stops.filter(s => s.status === 'pending').length} rest.</span></div>
-                  </div>
-              )}
-              
               {!searchQuery && !showMap && nextGroup && (
                   <div className="flex gap-3">
                       <button onClick={() => startRoute(nextGroup.lat, nextGroup.lng)} className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 text-white shadow-lg shadow-green-200 transition-all bg-green-600 hover:bg-green-700">
@@ -617,13 +517,6 @@ export default function App() {
                       onMarkerClick={handleMapMarkerClick}
                       onStartReorder={startReorderMode} 
                   />
-                  {!isReordering && nextGroup && (
-                      <div className="absolute bottom-6 left-6 right-6">
-                          <button onClick={() => startRoute(nextGroup.lat, nextGroup.lng)} className="w-full py-4 rounded-2xl font-bold text-lg flex items-center justify-center gap-3 text-white shadow-2xl bg-green-600">
-                              <Navigation size={20}/> Iniciar Rota
-                          </button>
-                      </div>
-                  )}
               </div>
           ) : (
               <RouteList 
@@ -635,7 +528,6 @@ export default function App() {
                   toggleGroup={toggleGroup}
                   setStatus={setStatus}
                   onStartReorder={startReorderMode}
-                  onEditAddress={updateAddress}
               />
           )}
       </div>
