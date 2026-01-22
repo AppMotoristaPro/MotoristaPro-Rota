@@ -55,7 +55,7 @@ export default function MapView({
     isReordering, 
     reorderList, 
     onMarkerClick,
-    onStartReorder // Nova prop para ativar edição direto do mapa
+    onStartReorder
 }) {
     const [selectedMarker, setSelectedMarker] = useState(null);
     const [mapInstance, setMapInstance] = useState(null);
@@ -90,15 +90,16 @@ export default function MapView({
                 )}
                 
                 {groupedStops.map((g, idx) => {
-                    // ITEM 2: Pino mostra a ORDEM DE VISITA (1, 2, 3...)
-                    let labelText = String(idx + 1); 
+                    let labelText = null; 
 
                     if (isReordering) {
                         const newIndex = reorderList.indexOf(g.id);
                         if (newIndex !== -1) {
                             labelText = String(newIndex + 1); 
-                        } else {
-                            labelText = null; // Limpa texto se não selecionado
+                        }
+                    } else {
+                        if (g.displayOrder !== null && g.displayOrder !== undefined) {
+                            labelText = String(g.displayOrder);
                         }
                     }
 
@@ -134,7 +135,6 @@ export default function MapView({
                     />
                 )}
 
-                {/* JANELA DE INFORMAÇÃO */}
                 {selectedMarker && !isReordering && (
                     <InfoWindowF 
                         position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
@@ -144,9 +144,8 @@ export default function MapView({
                             <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
                                 <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
                                 <div>
-                                    {/* ITEM 2: Janela mostra ID DA PLANILHA (stopId) */}
                                     <h3 className="font-bold text-sm text-slate-800 leading-tight">
-                                        {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID'}
+                                        {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID Planilha'}
                                     </h3>
                                     <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
                                 </div>
@@ -168,6 +167,7 @@ export default function MapView({
                                 {selectedMarker.items.map((item) => (
                                     <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
                                         <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
+                                        
                                         {item.status === 'pending' ? (
                                             <div className="flex gap-1">
                                                 <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"><XCircle size={10}/> Falha</button>
@@ -188,7 +188,6 @@ export default function MapView({
                 )}
             </GoogleMap>
 
-            {/* ITEM 1: BOTÃO EDITAR NO MAPA (Topo Direito) */}
             {!isReordering && (
                 <div className="absolute top-4 right-4 z-50">
                     <button 
