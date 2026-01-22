@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+// ITEM 1: IMPORT CheckCircle ADICIONADO PARA EVITAR CRASH
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
   Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, AlertCircle, Fuel, Timer, Calculator, Save, CheckCircle
@@ -15,6 +16,7 @@ import RouteList from './components/RouteList';
 const DB_KEY = 'mp_db_v70_finance_pro';
 const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
 
+// ... Helpers (sem alterações) ...
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
     if (typeof val === 'object') return JSON.stringify(val);
@@ -66,21 +68,14 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if (g) {
-                // CORREÇÃO LOGICA V41 (ITEM 1 & 4):
-                // Se tem pendente -> É pendente (Azul)
-                // Se acabou e teve falha -> É falha (Vermelho - Ocorrência)
-                // Se acabou e tudo sucesso -> É sucesso (Verde)
+                const t = g.items.length;
+                const s = g.items.filter(i => i.status === 'success').length;
+                const f = g.items.filter(i => i.status === 'failed').length;
                 
-                const pending = g.items.filter(i => i.status === 'pending').length;
-                const failed = g.items.filter(i => i.status === 'failed').length;
-                
-                if (pending > 0) {
-                    g.status = 'pending';
-                } else {
-                    // Finalizado
-                    if (failed > 0) g.status = 'failed'; // Vermelho se tiver ao menos 1 BO
-                    else g.status = 'success'; // Verde só se for perfeito
-                }
+                if (s === t) g.status = 'success';
+                else if (f === t) g.status = 'failed';
+                else if (s + f === t) g.status = 'partial';
+                else g.status = 'pending';
 
                 ordered.push(g);
                 seen.add(key);
@@ -106,7 +101,7 @@ const calculateProgressPercent = (stops) => {
 const getStartOfWeek = (date) => {
   const d = new Date(date);
   const day = d.getDay(); // 0 = Domingo
-  const diff = d.getDate() - day; 
+  const diff = d.getDate() - day; // Ajusta para o último domingo
   return new Date(d.setDate(diff));
 };
 
@@ -125,8 +120,7 @@ export default function App() {
   const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7));
 
   const [showFinishModal, setShowFinishModal] = useState(false);
-  // ITEM 2: Novo campo fuel
-  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '', fuel: '' });
+  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '' });
 
   const [tempStops, setTempStops] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
@@ -136,7 +130,6 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
-  
   const [realMetrics, setRealMetrics] = useState({ dist: '0 km', time: '0 min' });
 
   const [isReordering, setIsReordering] = useState(false);
@@ -144,7 +137,6 @@ export default function App() {
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
-  // DASHBOARD
   const dashboardStats = useMemo(() => {
       let filtered = [...routes];
       
@@ -153,6 +145,7 @@ export default function App() {
       } else if (dashFilterType === 'day' && dashFilterValue) {
           filtered = routes.filter(r => r.date === dashFilterValue);
       } else if (dashFilterType === 'week') {
+           // ITEM 6: LÓGICA DE SEMANA (DATA ATUAL)
            const now = new Date();
            const startOfWeek = getStartOfWeek(now);
            const endOfWeek = new Date(startOfWeek);
@@ -176,14 +169,11 @@ export default function App() {
       const graphData = filtered.map(r => {
           const val = parseFloat(r.value || 0);
           const exp = parseFloat(r.expenses || 0);
-          const fuel = parseFloat(r.fuel || 0);
           const km = parseFloat(r.realKm || 0);
           const hrs = parseFloat(r.hours || 0);
-          
-          const totalCost = exp + fuel;
 
           totalRevenue += val;
-          totalExpenses += totalCost;
+          totalExpenses += exp;
           totalKmDriven += km;
           totalHours += hrs;
 
@@ -195,7 +185,7 @@ export default function App() {
           return {
               date: new Date(r.date).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}),
               faturamento: val,
-              lucro: val - totalCost
+              lucro: val - exp
           };
       });
 
@@ -321,7 +311,6 @@ export default function App() {
           stops: tempStops, 
           optimized: true,
           expenses: 0, 
-          fuel: 0,
           realKm: 0,   
           hours: 0     
       }, ...routes]);
@@ -356,7 +345,6 @@ export default function App() {
       }
   };
 
-  // --- FINALIZAR ROTA ---
   const openFinishModal = () => {
       setShowFinishModal(true);
       const r = routes.find(ro => ro.id === activeRouteId);
@@ -364,8 +352,7 @@ export default function App() {
           setFinishData({
               km: r.realKm || '',
               hours: r.hours || '',
-              expenses: r.expenses || '',
-              fuel: r.fuel || ''
+              expenses: r.expenses || ''
           });
       }
   };
@@ -380,13 +367,12 @@ export default function App() {
           realKm: finishData.km,
           hours: finishData.hours,
           expenses: finishData.expenses,
-          fuel: finishData.fuel,
           isFinished: true 
       };
 
       setRoutes(updated);
       setShowFinishModal(false);
-      showToast("Rota Finalizada!", "success");
+      showToast("Rota Finalizada e Dados Salvos!", "success");
       setView('home'); 
   };
 
@@ -415,7 +401,7 @@ export default function App() {
   };
 
   const startReorderMode = () => {
-      if (!showMap) setShowMap(true); 
+      handleToggleMap(); 
       setIsReordering(true);
       setReorderList([]); 
       showToast("Toque nos pinos na ordem desejada!", "info");
@@ -512,9 +498,7 @@ export default function App() {
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
-  
-  // LOGICA V41: NextGroup é o primeiro que ainda é pending
-  const nextGroup = groupedStops.find(g => g.status === 'pending');
+  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
   
   const isRouteComplete = activeRoute && !nextGroup;
 
@@ -552,7 +536,7 @@ export default function App() {
 
   // --- DASHBOARD VIEW ---
   if (view === 'dashboard') return (
-      <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
+      <div className="min-h-screen bg-slate-50 flex flex-col pt-safe">
           <div className="bg-white p-6 shadow-sm z-10 sticky top-0">
               <div className="flex justify-between items-center mb-4">
                 <button onClick={() => setView('home')} className="p-2 -ml-2 hover:bg-slate-50 rounded-full"><ArrowLeft className="text-slate-500"/></button>
@@ -560,6 +544,7 @@ export default function App() {
                 <div className="w-8"></div>
               </div>
               
+              {/* ITEM 5: SELETOR DE FILTRO BONITO */}
               <div className="segmented-control">
                   <div className={`segmented-option ${dashFilterType==='all'?'active':''}`} onClick={() => setDashFilterType('all')}>Geral</div>
                   <div className={`segmented-option ${dashFilterType==='month'?'active':''}`} onClick={() => {setDashFilterType('month'); setDashFilterValue(new Date().toISOString().slice(0, 7))}}>Mês</div>
@@ -581,6 +566,7 @@ export default function App() {
           </div>
 
           <div className="flex-1 p-6 space-y-4 overflow-y-auto">
+              
               <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-900 p-5 rounded-2xl shadow-xl text-white col-span-2">
                       <div className="flex items-center gap-2 opacity-80 mb-2"><DollarSign size={16}/><span className="text-xs font-bold uppercase tracking-wider">Lucro Líquido</span></div>
@@ -624,11 +610,14 @@ export default function App() {
                       </ResponsiveContainer>
                   </div>
               )}
+              
+              <div className="text-center text-xs text-slate-300 font-bold py-6 uppercase tracking-widest">
+                  {dashboardStats.count} Rotas Analisadas
+              </div>
           </div>
       </div>
   );
 
-  // VIEW: HOME
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-12 bg-slate-100">
           <div className="flex justify-between items-center mb-8">
@@ -648,8 +637,8 @@ export default function App() {
           ) : (
               <div className="space-y-5">
                   {routes.map(r => {
-                      const done = r.stops.filter(s => s.status === 'success').length;
                       const percent = calculateProgressPercent(r.stops);
+                      const done = r.stops.filter(s => s.status === 'success').length;
                       
                       return (
                           <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 active:scale-[0.98] transition-transform duration-200">
@@ -686,7 +675,6 @@ export default function App() {
       </div>
   );
 
-  // VIEW: CREATE
   if (view === 'create') return (
       <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
           <div className="bg-white p-6 pb-4 shadow-sm z-10">
@@ -700,9 +688,10 @@ export default function App() {
                   <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Nome da Rota</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><MapIcon className="text-slate-300 mr-3" size={20}/><input type="text" className="flex-1 outline-none text-sm font-medium" placeholder="Ex: Rota Zona Sul" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/></div></div>
                   <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Empresa</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Building className="text-slate-300 mr-3" size={20}/><input type="text" className="flex-1 outline-none text-sm font-medium" placeholder="Ex: Mercado Livre" value={newRouteCompany} onChange={e => setNewRouteCompany(e.target.value)}/></div></div>
                   
+                  {/* ITEM 4: GRID CORRIGIDO PARA VALOR */}
                   <div className="grid grid-cols-2 gap-4">
-                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Data</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Calendar className="text-slate-300 mr-3" size={20}/><input type="date" className="w-full outline-none text-sm font-medium" value={newRouteDate} onChange={e => setNewRouteDate(e.target.value)}/></div></div>
-                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Valor (R$)</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><DollarSign className="text-slate-300 mr-1" size={20}/><input type="number" className="w-full outline-none text-sm font-medium" placeholder="0,00" value={newRouteValue} onChange={e => setNewRouteValue(e.target.value)}/></div></div>
+                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Data</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Calendar className="text-slate-300 mr-2 shrink-0" size={20}/><input type="date" className="w-full outline-none text-sm font-medium bg-transparent" value={newRouteDate} onChange={e => setNewRouteDate(e.target.value)}/></div></div>
+                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Valor (R$)</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><DollarSign className="text-slate-300 mr-1 shrink-0" size={20}/><input type="number" className="w-full outline-none text-sm font-medium bg-transparent" placeholder="0,00" value={newRouteValue} onChange={e => setNewRouteValue(e.target.value)}/></div></div>
                   </div>
               </div>
 
@@ -719,12 +708,11 @@ export default function App() {
       </div>
   );
 
-  // VIEW: DETAILS
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
-          {/* ITEM 2: MODAL DE FINALIZAÇÃO (VERDE E NOVO CAMPO) */}
+          {/* MODAL DE FINALIZAÇÃO */}
           {showFinishModal && (
               <div className="absolute inset-0 z-[3000] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
                   <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10">
@@ -738,7 +726,7 @@ export default function App() {
                       <div className="space-y-4 mb-8">
                           <div>
                               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">KM Final (Rodados)</label>
-                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
+                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition">
                                   <MapPin className="text-slate-400 mr-3" size={20}/>
                                   <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.km} onChange={e => setFinishData({...finishData, km: e.target.value})}/>
                                   <span className="text-sm font-bold text-slate-400">km</span>
@@ -748,32 +736,23 @@ export default function App() {
                           <div className="flex gap-4">
                               <div className="flex-1">
                                   <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Horas</label>
-                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
+                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 transition">
                                       <Timer className="text-slate-400 mr-2" size={20}/>
                                       <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.hours} onChange={e => setFinishData({...finishData, hours: e.target.value})}/>
                                   </div>
                               </div>
                               <div className="flex-1">
                                   <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Gastos (R$)</label>
-                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
-                                      <DollarSign className="text-slate-400 mr-2" size={20}/>
+                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 transition">
+                                      <Fuel className="text-slate-400 mr-2" size={20}/>
                                       <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.expenses} onChange={e => setFinishData({...finishData, expenses: e.target.value})}/>
                                   </div>
                               </div>
                           </div>
-                          
-                          {/* CAMPO NOVO: GASOLINA */}
-                          <div>
-                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Custo Gasolina (R$)</label>
-                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
-                                  <Fuel className="text-slate-400 mr-3" size={20}/>
-                                  <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0 (Opcional)" value={finishData.fuel} onChange={e => setFinishData({...finishData, fuel: e.target.value})}/>
-                              </div>
-                          </div>
                       </div>
 
-                      <button onClick={saveFinishData} className="w-full bg-green-600 text-white py-4 rounded-2xl font-extrabold text-lg shadow-xl shadow-green-200 active:scale-95 transition flex items-center justify-center gap-2">
-                          <CheckCircle size={20}/> FINALIZAR
+                      <button onClick={saveFinishData} className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-amber-200 active:scale-95 transition flex items-center justify-center gap-2">
+                          <Save size={20}/> Confirmar & Relatar
                       </button>
                   </div>
               </div>
@@ -861,11 +840,11 @@ export default function App() {
               />
           )}
 
-          {/* BOTÃO FINALIZAR (ITEM 2) */}
+          {/* BOTÃO FLUTUANTE DE FINALIZAR ROTA (APENAS SE 100% COMPLETO) */}
           {!showMap && isRouteComplete && !activeRoute.isFinished && (
               <div className="fixed bottom-6 left-6 right-6 animate-in slide-in-from-bottom-10">
-                   <button onClick={openFinishModal} className="w-full bg-green-600 text-white py-4 rounded-2xl font-extrabold text-lg shadow-2xl shadow-green-200 flex items-center justify-center gap-2">
-                       <CheckCircle size={24}/> FINALIZAR
+                   <button onClick={openFinishModal} className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white py-4 rounded-2xl font-extrabold text-lg shadow-2xl shadow-orange-300 flex items-center justify-center gap-2">
+                       <CheckCircle size={24}/> FINALIZAR & RELATAR
                    </button>
               </div>
           )}

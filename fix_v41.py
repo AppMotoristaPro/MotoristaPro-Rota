@@ -6,235 +6,13 @@ import subprocess
 # --- CONFIGURAÇÕES ---
 BACKUP_DIR = "backup"
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v40_{TIMESTAMP}")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"update_v41_{TIMESTAMP}")
 
 # CHAVE API
 API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
-# --- 1. CSS (SAFE AREA + ESTILO SEGMENTADO) ---
-INDEX_CSS = """@tailwind base;
-@tailwind components;
-@tailwind utilities;
-@import 'maplibre-gl/dist/maplibre-gl.css';
-
-body {
-  margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #F8FAFC;
-  color: #0F172A;
-  -webkit-tap-highlight-color: transparent;
-  /* ITEM 2: Respeita a área segura do topo (Notch/Barra de Status) */
-  padding-top: env(safe-area-inset-top); 
-  height: 100vh; /* Garante altura total */
-  display: flex;
-  flex-direction: column;
-}
-
-#root {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.modern-card {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(0,0,0,0.05);
-  transition: transform 0.1s ease;
-  overflow: hidden;
-}
-
-.modern-card:active { transform: scale(0.995); }
-
-/* Botões */
-.btn-action-lg {
-  height: 56px;
-  font-size: 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  line-height: 1.1;
-  font-weight: 700;
-}
-
-/* ITEM 5: Seletor de Filtro Estilo iOS */
-.segmented-control {
-  background-color: #F1F5F9;
-  padding: 4px;
-  border-radius: 12px;
-  display: flex;
-  position: relative;
-}
-
-.segmented-option {
-  flex: 1;
-  text-align: center;
-  padding: 8px 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: #64748B;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  cursor: pointer;
-  z-index: 2;
-}
-
-.segmented-option.active {
-  background-color: white;
-  color: #0F172A;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-}
-
-.fab-main {
-  background: #0F172A;
-  color: white;
-  box-shadow: 0 8px 25px rgba(15, 23, 42, 0.4);
-}
-"""
-
-# --- 2. ROUTE LIST (ESPAÇAMENTO AUMENTADO) ---
-CODE_ROUTE_LIST = """import React, { useState } from 'react';
-import { Check, ChevronUp, ChevronDown, Layers, Package, Map as MapIcon, AlertCircle } from 'lucide-react';
-
-export default function RouteList(props) {
-    const { 
-        groupedStops = [], 
-        nextGroup = null, 
-        activeRoute = {}, 
-        searchQuery = '', 
-        expandedGroups = {}, 
-        toggleGroup, 
-        setStatus,
-        onStartReorder
-    } = props;
-
-    const safeStr = (val) => val ? String(val).trim() : '';
-
-    const setAllStatus = (items, status) => {
-        items.forEach(item => {
-            if (item.status === 'pending') setStatus(item.id, status);
-        });
-    };
-
-    const filteredGroups = !searchQuery ? groupedStops : groupedStops.filter(g => 
-        safeStr(g.mainName).toLowerCase().includes(searchQuery.toLowerCase()) || 
-        safeStr(g.mainAddress).toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    return (
-        <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 relative bg-slate-50">
-            
-            {!searchQuery && nextGroup && (
-                <div className="bg-white rounded-2xl p-5 border-l-4 border-blue-600 shadow-md relative overflow-hidden mb-8">
-                    <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-[10px] font-bold rounded-bl-xl uppercase">Próxima</div>
-                    <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1 pr-20">
-                       {nextGroup.displayOrder ? `Parada ${nextGroup.displayOrder}` : 'Parada S/N'}
-                    </h3>
-                    <p className="text-xs text-slate-500 mb-4">{nextGroup.mainAddress}</p>
-                    
-                    {nextGroup.items.filter(i => i.status === 'pending').length > 1 && (
-                        <button 
-                            onClick={() => setAllStatus(nextGroup.items, 'success')}
-                            className="w-full mb-4 py-3 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-blue-100 active:scale-95 transition"
-                        >
-                            <Layers size={16}/> ENTREGAR TODOS ({nextGroup.items.filter(i => i.status === 'pending').length})
-                        </button>
-                    )}
-
-                    <div className="space-y-3 border-t border-slate-100 pt-3">
-                        {nextGroup.items.map((item, idx) => (
-                            item.status === 'pending' && (
-                                <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <Package size={14} className="text-blue-400"/>
-                                            <span className="text-xs font-bold text-slate-700">PACOTE {idx + 1}</span>
-                                        </div>
-                                    </div>
-                                    <p className="text-xs font-medium text-slate-600 mb-3 ml-6">{item.address}</p>
-                                    <div className="flex gap-2">
-                                        <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-3 bg-white border border-red-100 text-red-500 rounded-lg text-[10px] font-bold uppercase shadow-sm flex items-center justify-center gap-1">
-                                            <AlertCircle size={12}/> Ocorrência
-                                        </button>
-                                        <button onClick={() => setStatus(item.id, 'success')} className="flex-[2] py-3 bg-green-500 text-white rounded-lg text-[10px] font-bold uppercase shadow-md active:scale-95 transition">
-                                            Entregue
-                                        </button>
-                                    </div>
-                                </div>
-                            )
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-3">
-                Lista de Entregas
-            </h4>
-            
-            {/* ITEM 3: Espaçamento entre cards aumentado (space-y-4 na div pai não funciona bem com key map, melhor mb-4 no item) */}
-            <div className="space-y-4"> 
-                {filteredGroups.map((group, idx) => (
-                    (!searchQuery && nextGroup && group.id === nextGroup.id) ? null : (
-                        <div key={group.id} className={`bg-white rounded-xl shadow-sm border-l-4 overflow-hidden ${group.status === 'success' ? 'border-green-400 opacity-60' : 'border-slate-300'}`}>
-                            <div onClick={() => toggleGroup(group.id)} className="p-4 flex items-center gap-4 cursor-pointer active:bg-slate-50 transition">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${group.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                    {group.status === 'success' ? <Check size={14}/> : (idx + 1)}
-                                </div>
-
-                                <div className="flex-1 min-w-0">
-                                    <h4 className="font-bold text-slate-800 text-sm truncate">
-                                        {group.displayOrder ? `Parada: ${group.displayOrder}` : group.mainName}
-                                    </h4>
-                                    <p className="text-[11px] text-slate-400 truncate mt-0.5">{group.items.length} pacotes • {safeStr(group.mainAddress)}</p>
-                                </div>
-                                
-                                {group.items.length > 1 ? (expandedGroups[group.id] ? <ChevronUp size={16} className="text-slate-300"/> : <ChevronDown size={16} className="text-slate-300"/>) : null}
-                            </div>
-                            
-                            {(expandedGroups[group.id] || (group.items.length > 1 && expandedGroups[group.id])) && (
-                                <div className="bg-slate-50 border-t border-slate-100 px-4 py-2 space-y-2">
-                                    {group.items.map((item) => (
-                                        <div key={item.id} className="flex flex-col py-2 border-b border-slate-200 last:border-0">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <div>
-                                                    <span className="text-[10px] font-bold text-blue-500 block uppercase mb-0.5">Endereço</span>
-                                                    <span className="text-xs font-medium text-slate-700 block leading-tight">{item.address}</span>
-                                                </div>
-                                            </div>
-                                            {item.status === 'pending' ? (
-                                                <div className="flex gap-2 w-full">
-                                                    <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-lg font-bold text-[10px] uppercase flex items-center justify-center gap-1">
-                                                        <AlertCircle size={12}/> Ocorrência
-                                                    </button>
-                                                    <button onClick={() => setStatus(item.id, 'success')} className="flex-1 py-2 bg-green-500 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm">Entregue</button>
-                                                </div>
-                                            ) : (
-                                                <span className={`text-[10px] font-bold px-2 py-1 rounded w-fit ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
-                                                    {item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}
-                                                </span>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )
-                ))}
-            </div>
-            <div className="h-12"></div>
-        </div>
-    );
-}
-"""
-
-# --- 3. APP (DASHBOARD REFORMULADO) ---
+# --- 1. APP.JSX (LÓGICA DE STATUS CORRIGIDA + MODAL NOVO) ---
 APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
-// ITEM 1: IMPORT CheckCircle ADICIONADO PARA EVITAR CRASH
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
   Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, AlertCircle, Fuel, Timer, Calculator, Save, CheckCircle
@@ -251,7 +29,6 @@ import RouteList from './components/RouteList';
 const DB_KEY = 'mp_db_v70_finance_pro';
 const GOOGLE_KEY = "__API_KEY__";
 
-// ... Helpers (sem alterações) ...
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
     if (typeof val === 'object') return JSON.stringify(val);
@@ -303,14 +80,21 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if (g) {
-                const t = g.items.length;
-                const s = g.items.filter(i => i.status === 'success').length;
-                const f = g.items.filter(i => i.status === 'failed').length;
+                // CORREÇÃO LOGICA V41 (ITEM 1 & 4):
+                // Se tem pendente -> É pendente (Azul)
+                // Se acabou e teve falha -> É falha (Vermelho - Ocorrência)
+                // Se acabou e tudo sucesso -> É sucesso (Verde)
                 
-                if (s === t) g.status = 'success';
-                else if (f === t) g.status = 'failed';
-                else if (s + f === t) g.status = 'partial';
-                else g.status = 'pending';
+                const pending = g.items.filter(i => i.status === 'pending').length;
+                const failed = g.items.filter(i => i.status === 'failed').length;
+                
+                if (pending > 0) {
+                    g.status = 'pending';
+                } else {
+                    // Finalizado
+                    if (failed > 0) g.status = 'failed'; // Vermelho se tiver ao menos 1 BO
+                    else g.status = 'success'; // Verde só se for perfeito
+                }
 
                 ordered.push(g);
                 seen.add(key);
@@ -336,7 +120,7 @@ const calculateProgressPercent = (stops) => {
 const getStartOfWeek = (date) => {
   const d = new Date(date);
   const day = d.getDay(); // 0 = Domingo
-  const diff = d.getDate() - day; // Ajusta para o último domingo
+  const diff = d.getDate() - day; 
   return new Date(d.setDate(diff));
 };
 
@@ -355,7 +139,8 @@ export default function App() {
   const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7));
 
   const [showFinishModal, setShowFinishModal] = useState(false);
-  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '' });
+  // ITEM 2: Novo campo fuel
+  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '', fuel: '' });
 
   const [tempStops, setTempStops] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
@@ -365,6 +150,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
+  
   const [realMetrics, setRealMetrics] = useState({ dist: '0 km', time: '0 min' });
 
   const [isReordering, setIsReordering] = useState(false);
@@ -372,6 +158,7 @@ export default function App() {
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
+  // DASHBOARD
   const dashboardStats = useMemo(() => {
       let filtered = [...routes];
       
@@ -380,7 +167,6 @@ export default function App() {
       } else if (dashFilterType === 'day' && dashFilterValue) {
           filtered = routes.filter(r => r.date === dashFilterValue);
       } else if (dashFilterType === 'week') {
-           // ITEM 6: LÓGICA DE SEMANA (DATA ATUAL)
            const now = new Date();
            const startOfWeek = getStartOfWeek(now);
            const endOfWeek = new Date(startOfWeek);
@@ -404,11 +190,14 @@ export default function App() {
       const graphData = filtered.map(r => {
           const val = parseFloat(r.value || 0);
           const exp = parseFloat(r.expenses || 0);
+          const fuel = parseFloat(r.fuel || 0);
           const km = parseFloat(r.realKm || 0);
           const hrs = parseFloat(r.hours || 0);
+          
+          const totalCost = exp + fuel;
 
           totalRevenue += val;
-          totalExpenses += exp;
+          totalExpenses += totalCost;
           totalKmDriven += km;
           totalHours += hrs;
 
@@ -420,7 +209,7 @@ export default function App() {
           return {
               date: new Date(r.date).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}),
               faturamento: val,
-              lucro: val - exp
+              lucro: val - totalCost
           };
       });
 
@@ -546,6 +335,7 @@ export default function App() {
           stops: tempStops, 
           optimized: true,
           expenses: 0, 
+          fuel: 0,
           realKm: 0,   
           hours: 0     
       }, ...routes]);
@@ -580,6 +370,7 @@ export default function App() {
       }
   };
 
+  // --- FINALIZAR ROTA ---
   const openFinishModal = () => {
       setShowFinishModal(true);
       const r = routes.find(ro => ro.id === activeRouteId);
@@ -587,7 +378,8 @@ export default function App() {
           setFinishData({
               km: r.realKm || '',
               hours: r.hours || '',
-              expenses: r.expenses || ''
+              expenses: r.expenses || '',
+              fuel: r.fuel || ''
           });
       }
   };
@@ -602,12 +394,13 @@ export default function App() {
           realKm: finishData.km,
           hours: finishData.hours,
           expenses: finishData.expenses,
+          fuel: finishData.fuel,
           isFinished: true 
       };
 
       setRoutes(updated);
       setShowFinishModal(false);
-      showToast("Rota Finalizada e Dados Salvos!", "success");
+      showToast("Rota Finalizada!", "success");
       setView('home'); 
   };
 
@@ -636,7 +429,7 @@ export default function App() {
   };
 
   const startReorderMode = () => {
-      handleToggleMap(); 
+      if (!showMap) setShowMap(true); 
       setIsReordering(true);
       setReorderList([]); 
       showToast("Toque nos pinos na ordem desejada!", "info");
@@ -733,7 +526,9 @@ export default function App() {
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
-  const nextGroup = groupedStops.find(g => g.status === 'pending' || g.status === 'partial');
+  
+  // LOGICA V41: NextGroup é o primeiro que ainda é pending
+  const nextGroup = groupedStops.find(g => g.status === 'pending');
   
   const isRouteComplete = activeRoute && !nextGroup;
 
@@ -771,7 +566,7 @@ export default function App() {
 
   // --- DASHBOARD VIEW ---
   if (view === 'dashboard') return (
-      <div className="min-h-screen bg-slate-50 flex flex-col pt-safe">
+      <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
           <div className="bg-white p-6 shadow-sm z-10 sticky top-0">
               <div className="flex justify-between items-center mb-4">
                 <button onClick={() => setView('home')} className="p-2 -ml-2 hover:bg-slate-50 rounded-full"><ArrowLeft className="text-slate-500"/></button>
@@ -779,7 +574,6 @@ export default function App() {
                 <div className="w-8"></div>
               </div>
               
-              {/* ITEM 5: SELETOR DE FILTRO BONITO */}
               <div className="segmented-control">
                   <div className={`segmented-option ${dashFilterType==='all'?'active':''}`} onClick={() => setDashFilterType('all')}>Geral</div>
                   <div className={`segmented-option ${dashFilterType==='month'?'active':''}`} onClick={() => {setDashFilterType('month'); setDashFilterValue(new Date().toISOString().slice(0, 7))}}>Mês</div>
@@ -801,7 +595,6 @@ export default function App() {
           </div>
 
           <div className="flex-1 p-6 space-y-4 overflow-y-auto">
-              
               <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-900 p-5 rounded-2xl shadow-xl text-white col-span-2">
                       <div className="flex items-center gap-2 opacity-80 mb-2"><DollarSign size={16}/><span className="text-xs font-bold uppercase tracking-wider">Lucro Líquido</span></div>
@@ -845,14 +638,11 @@ export default function App() {
                       </ResponsiveContainer>
                   </div>
               )}
-              
-              <div className="text-center text-xs text-slate-300 font-bold py-6 uppercase tracking-widest">
-                  {dashboardStats.count} Rotas Analisadas
-              </div>
           </div>
       </div>
   );
 
+  // VIEW: HOME
   if (view === 'home') return (
       <div className="min-h-screen pb-24 px-6 pt-12 bg-slate-100">
           <div className="flex justify-between items-center mb-8">
@@ -872,8 +662,8 @@ export default function App() {
           ) : (
               <div className="space-y-5">
                   {routes.map(r => {
-                      const percent = calculateProgressPercent(r.stops);
                       const done = r.stops.filter(s => s.status === 'success').length;
+                      const percent = calculateProgressPercent(r.stops);
                       
                       return (
                           <div key={r.id} onClick={() => { setActiveRouteId(r.id); setView('details'); }} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 active:scale-[0.98] transition-transform duration-200">
@@ -910,6 +700,7 @@ export default function App() {
       </div>
   );
 
+  // VIEW: CREATE
   if (view === 'create') return (
       <div className="min-h-screen bg-slate-50 flex flex-col pt-12">
           <div className="bg-white p-6 pb-4 shadow-sm z-10">
@@ -923,10 +714,9 @@ export default function App() {
                   <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Nome da Rota</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><MapIcon className="text-slate-300 mr-3" size={20}/><input type="text" className="flex-1 outline-none text-sm font-medium" placeholder="Ex: Rota Zona Sul" value={newRouteName} onChange={e => setNewRouteName(e.target.value)}/></div></div>
                   <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Empresa</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Building className="text-slate-300 mr-3" size={20}/><input type="text" className="flex-1 outline-none text-sm font-medium" placeholder="Ex: Mercado Livre" value={newRouteCompany} onChange={e => setNewRouteCompany(e.target.value)}/></div></div>
                   
-                  {/* ITEM 4: GRID CORRIGIDO PARA VALOR */}
                   <div className="grid grid-cols-2 gap-4">
-                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Data</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Calendar className="text-slate-300 mr-2 shrink-0" size={20}/><input type="date" className="w-full outline-none text-sm font-medium bg-transparent" value={newRouteDate} onChange={e => setNewRouteDate(e.target.value)}/></div></div>
-                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Valor (R$)</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><DollarSign className="text-slate-300 mr-1 shrink-0" size={20}/><input type="number" className="w-full outline-none text-sm font-medium bg-transparent" placeholder="0,00" value={newRouteValue} onChange={e => setNewRouteValue(e.target.value)}/></div></div>
+                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Data</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><Calendar className="text-slate-300 mr-3" size={20}/><input type="date" className="w-full outline-none text-sm font-medium" value={newRouteDate} onChange={e => setNewRouteDate(e.target.value)}/></div></div>
+                      <div><label className="text-xs font-bold text-slate-500 uppercase ml-1 mb-1 block">Valor (R$)</label><div className="flex items-center bg-white p-4 rounded-xl border border-slate-200 focus-within:border-blue-500 transition"><DollarSign className="text-slate-300 mr-1" size={20}/><input type="number" className="w-full outline-none text-sm font-medium" placeholder="0,00" value={newRouteValue} onChange={e => setNewRouteValue(e.target.value)}/></div></div>
                   </div>
               </div>
 
@@ -943,11 +733,12 @@ export default function App() {
       </div>
   );
 
+  // VIEW: DETAILS
   return (
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
-          {/* MODAL DE FINALIZAÇÃO */}
+          {/* ITEM 2: MODAL DE FINALIZAÇÃO (VERDE E NOVO CAMPO) */}
           {showFinishModal && (
               <div className="absolute inset-0 z-[3000] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
                   <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10">
@@ -961,7 +752,7 @@ export default function App() {
                       <div className="space-y-4 mb-8">
                           <div>
                               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">KM Final (Rodados)</label>
-                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition">
+                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
                                   <MapPin className="text-slate-400 mr-3" size={20}/>
                                   <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.km} onChange={e => setFinishData({...finishData, km: e.target.value})}/>
                                   <span className="text-sm font-bold text-slate-400">km</span>
@@ -971,23 +762,32 @@ export default function App() {
                           <div className="flex gap-4">
                               <div className="flex-1">
                                   <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Horas</label>
-                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 transition">
+                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
                                       <Timer className="text-slate-400 mr-2" size={20}/>
                                       <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.hours} onChange={e => setFinishData({...finishData, hours: e.target.value})}/>
                                   </div>
                               </div>
                               <div className="flex-1">
                                   <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Gastos (R$)</label>
-                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-blue-500 transition">
-                                      <Fuel className="text-slate-400 mr-2" size={20}/>
+                                  <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
+                                      <DollarSign className="text-slate-400 mr-2" size={20}/>
                                       <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.expenses} onChange={e => setFinishData({...finishData, expenses: e.target.value})}/>
                                   </div>
                               </div>
                           </div>
+                          
+                          {/* CAMPO NOVO: GASOLINA */}
+                          <div>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Custo Gasolina (R$)</label>
+                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
+                                  <Fuel className="text-slate-400 mr-3" size={20}/>
+                                  <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0 (Opcional)" value={finishData.fuel} onChange={e => setFinishData({...finishData, fuel: e.target.value})}/>
+                              </div>
+                          </div>
                       </div>
 
-                      <button onClick={saveFinishData} className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-amber-200 active:scale-95 transition flex items-center justify-center gap-2">
-                          <Save size={20}/> Confirmar & Relatar
+                      <button onClick={saveFinishData} className="w-full bg-green-600 text-white py-4 rounded-2xl font-extrabold text-lg shadow-xl shadow-green-200 active:scale-95 transition flex items-center justify-center gap-2">
+                          <CheckCircle size={20}/> FINALIZAR
                       </button>
                   </div>
               </div>
@@ -1075,11 +875,11 @@ export default function App() {
               />
           )}
 
-          {/* BOTÃO FLUTUANTE DE FINALIZAR ROTA (APENAS SE 100% COMPLETO) */}
+          {/* BOTÃO FINALIZAR (ITEM 2) */}
           {!showMap && isRouteComplete && !activeRoute.isFinished && (
               <div className="fixed bottom-6 left-6 right-6 animate-in slide-in-from-bottom-10">
-                   <button onClick={openFinishModal} className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white py-4 rounded-2xl font-extrabold text-lg shadow-2xl shadow-orange-300 flex items-center justify-center gap-2">
-                       <CheckCircle size={24}/> FINALIZAR & RELATAR
+                   <button onClick={openFinishModal} className="w-full bg-green-600 text-white py-4 rounded-2xl font-extrabold text-lg shadow-2xl shadow-green-200 flex items-center justify-center gap-2">
+                       <CheckCircle size={24}/> FINALIZAR
                    </button>
               </div>
           )}
@@ -1088,20 +888,220 @@ export default function App() {
 }
 """
 
+# --- 2. COMPONENTS/MAPVIEW.JSX (ITEM 3: Forçar Z-Index) ---
+CODE_MAP_VIEW = """import React, { useState } from 'react';
+import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, Edit3 } from 'lucide-react';
+
+const mapContainerStyle = { width: '100%', height: '100%' };
+const mapOptions = {
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false
+};
+
+const getMarkerIcon = (status, isCurrent, isReordering, reorderIndex) => {
+    let fillColor = "#3B82F6"; 
+    let scale = 1.6;
+    let strokeColor = "#FFFFFF";
+
+    if (isReordering) {
+        if (reorderIndex !== -1) {
+            fillColor = "#10B981"; 
+            scale = 1.8;
+            strokeColor = "#000000";
+        } else {
+            fillColor = "#94A3B8"; 
+        }
+    } else {
+        if (status === 'success') fillColor = "#10B981";
+        if (status === 'failed') fillColor = "#EF4444";
+        if (status === 'partial') fillColor = "#F59E0B"; 
+        if (isCurrent) {
+            fillColor = "#0F172A"; 
+            scale = 2.2;
+        }
+    }
+
+    return {
+        path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
+        fillColor: fillColor,
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: strokeColor,
+        scale: scale,
+        anchor: { x: 12, y: 22 },
+        labelOrigin: { x: 12, y: 10 }
+    };
+};
+
+export default function MapView({ 
+    userPos, 
+    groupedStops, 
+    directionsResponse, 
+    nextGroup, 
+    openNav,
+    isLoaded,
+    setStatus,
+    setAllStatus,
+    isReordering, 
+    reorderList, 
+    onMarkerClick,
+    onStartReorder
+}) {
+    const [selectedMarker, setSelectedMarker] = useState(null);
+    const [mapInstance, setMapInstance] = useState(null);
+
+    if (!isLoaded) return <div className="flex h-full items-center justify-center bg-slate-100"><Loader2 className="animate-spin text-slate-400"/></div>;
+
+    const handleMarkerClick = (group) => {
+        if (isReordering) {
+            onMarkerClick(group.id);
+        } else {
+            setSelectedMarker(group);
+        }
+    };
+
+    return (
+        <div className="relative w-full h-full">
+            <GoogleMap
+                mapContainerStyle={mapContainerStyle}
+                center={userPos || { lat: -23.55, lng: -46.63 }}
+                zoom={15}
+                options={mapOptions}
+                onLoad={setMapInstance}
+            >
+                {!isReordering && directionsResponse && (
+                    <DirectionsRenderer 
+                        directions={directionsResponse} 
+                        options={{ 
+                            suppressMarkers: true, 
+                            polylineOptions: { strokeColor: "#2563EB", strokeWeight: 6, strokeOpacity: 0.8 } 
+                        }} 
+                    />
+                )}
+                
+                {groupedStops.map((g, idx) => {
+                    let labelText = null; 
+
+                    if (isReordering) {
+                        const newIndex = reorderList.indexOf(g.id);
+                        if (newIndex !== -1) {
+                            labelText = String(newIndex + 1); 
+                        }
+                    } else {
+                        if (g.displayOrder !== null && g.displayOrder !== undefined) {
+                            labelText = String(g.displayOrder);
+                        }
+                    }
+
+                    return (
+                        <MarkerF 
+                            key={g.id} 
+                            position={{ lat: g.lat, lng: g.lng }}
+                            label={labelText ? { text: labelText, color: "white", fontSize: "11px", fontWeight: "bold" } : null}
+                            icon={getMarkerIcon(
+                                g.status, 
+                                !isReordering && nextGroup && g.id === nextGroup.id,
+                                isReordering,
+                                isReordering ? reorderList.indexOf(g.id) : -1
+                            )}
+                            onClick={() => handleMarkerClick(g)}
+                            zIndex={10}
+                        />
+                    )
+                })}
+                
+                {userPos && (
+                    <MarkerF 
+                        position={{ lat: userPos.lat, lng: userPos.lng }} 
+                        icon={{
+                            path: window.google.maps.SymbolPath.CIRCLE,
+                            scale: 8,
+                            fillColor: "#3B82F6",
+                            fillOpacity: 1,
+                            strokeWeight: 3,
+                            strokeColor: "white",
+                        }}
+                        zIndex={2000}
+                    />
+                )}
+
+                {selectedMarker && !isReordering && (
+                    <InfoWindowF 
+                        position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }} 
+                        onCloseClick={() => setSelectedMarker(null)}
+                    >
+                        <div className="p-1 min-w-[240px] max-w-[260px]">
+                            <div className="flex items-start gap-2 mb-2 border-b border-gray-100 pb-2">
+                                <div className="bg-slate-100 p-1.5 rounded-full mt-0.5"><MapPin size={16} className="text-slate-600"/></div>
+                                <div>
+                                    <h3 className="font-bold text-sm text-slate-800 leading-tight">
+                                        {selectedMarker.displayOrder ? `Parada ${selectedMarker.displayOrder}` : 'Sem ID Planilha'}
+                                    </h3>
+                                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{selectedMarker.mainName}</p>
+                                </div>
+                            </div>
+                            
+                            {selectedMarker.items.filter(i => i.status === 'pending').length > 1 && (
+                                <button 
+                                    onClick={() => {
+                                        setAllStatus(selectedMarker.items, 'success');
+                                        setSelectedMarker(null);
+                                    }}
+                                    className="w-full mb-2 bg-green-100 text-green-700 py-1.5 rounded border border-green-200 text-[10px] font-bold flex items-center justify-center gap-2"
+                                >
+                                    <Layers size={12}/> ENTREGAR TODOS ({selectedMarker.items.filter(i => i.status === 'pending').length})
+                                </button>
+                            )}
+
+                            <div className="max-h-[150px] overflow-y-auto mb-2 space-y-2">
+                                {selectedMarker.items.map((item) => (
+                                    <div key={item.id} className="bg-slate-50 p-2 rounded border border-slate-100">
+                                        <p className="text-[10px] font-bold text-slate-700 mb-1 truncate">{item.address}</p>
+                                        
+                                        {item.status === 'pending' ? (
+                                            <div className="flex gap-1">
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"><XCircle size={10}/> Ocorrência</button>
+                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 bg-green-500 text-white py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm"><CheckCircle size={10}/> Entregue</button>
+                                            </div>
+                                        ) : (
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded w-full block text-center ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <button onClick={() => openNav(selectedMarker.lat, selectedMarker.lng)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-2 shadow-sm">
+                                <Navigation size={14}/> Navegar
+                            </button>
+                        </div>
+                    </InfoWindowF>
+                )}
+            </GoogleMap>
+
+            {/* ITEM 3: BOTÃO EDITAR NO TOPO DIREITO DO MAPA */}
+            {!isReordering && (
+                <div className="absolute top-4 right-4 z-50">
+                    <button 
+                        onClick={onStartReorder}
+                        className="bg-white text-slate-700 p-3 rounded-full shadow-lg border border-slate-200 flex items-center justify-center active:scale-95 transition"
+                    >
+                        <Edit3 size={20} />
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+"""
+
 FILES_TO_WRITE = {
-    "src/index.css": INDEX_CSS,
-    "src/components/RouteList.jsx": CODE_ROUTE_LIST,
-    "src/App.jsx": APP_JSX_CONTENT.replace("__API_KEY__", API_KEY_VALUE)
+    "src/App.jsx": APP_JSX_CONTENT.replace("__API_KEY__", API_KEY_VALUE),
+    "src/components/MapView.jsx": CODE_MAP_VIEW
 }
 
 def write_files():
-    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
-    os.makedirs(CURRENT_BACKUP_PATH)
-    
-    # Backup
-    for f in ["src/App.jsx", "src/components/RouteList.jsx", "src/index.css"]:
-        if os.path.exists(f): shutil.copy2(f, CURRENT_BACKUP_PATH)
-
     for path, content in FILES_TO_WRITE.items():
         dir_name = os.path.dirname(path)
         if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
@@ -1110,12 +1110,17 @@ def write_files():
         print(f"Escrevendo {path}")
 
 def main():
-    print(f"--- Iniciando V40 (Crash Fix + Layout + Week) {TIMESTAMP} ---")
-    write_files()
+    print(f"--- Iniciando V41 (Logic Fix + Finance + Map Button) {TIMESTAMP} ---")
+    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
+    os.makedirs(CURRENT_BACKUP_PATH)
     
+    if os.path.exists("src/App.jsx"): shutil.copy2("src/App.jsx", CURRENT_BACKUP_PATH)
+
+    write_files()
+
     print("--- Git Push ---")
     subprocess.run("git add .", shell=True)
-    subprocess.run(f'git commit -m "Update V40: Fix Crash, Layout & Week Filter - {TIMESTAMP}"', shell=True)
+    subprocess.run(f'git commit -m "Update V41: Logic Fix, Green Finish Button & Map Edit - {TIMESTAMP}"', shell=True)
     subprocess.run("git push", shell=True)
     
     os.remove(__file__)

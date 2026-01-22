@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GoogleMap, MarkerF, InfoWindowF, DirectionsRenderer } from '@react-google-maps/api';
-import { Loader2, Navigation, Package, MapPin, AlertCircle, CheckCircle, Layers, Edit3 } from 'lucide-react';
+import { Loader2, Navigation, Package, MapPin, XCircle, CheckCircle, Layers, Edit3 } from 'lucide-react';
 
 const mapContainerStyle = { width: '100%', height: '100%' };
 const mapOptions = {
@@ -10,24 +10,24 @@ const mapOptions = {
 };
 
 const getMarkerIcon = (status, isCurrent, isReordering, reorderIndex) => {
-    let fillColor = "#3B82F6"; // Azul
+    let fillColor = "#3B82F6"; 
     let scale = 1.6;
     let strokeColor = "#FFFFFF";
 
     if (isReordering) {
         if (reorderIndex !== -1) {
-            fillColor = "#10B981"; // Verde (Selecionado)
+            fillColor = "#10B981"; 
             scale = 1.8;
             strokeColor = "#000000";
         } else {
-            fillColor = "#94A3B8"; // Cinza (Pendente)
+            fillColor = "#94A3B8"; 
         }
     } else {
         if (status === 'success') fillColor = "#10B981";
         if (status === 'failed') fillColor = "#EF4444";
-        if (status === 'partial') fillColor = "#F59E0B"; // Amarelo (Parcial finalizado)
+        if (status === 'partial') fillColor = "#F59E0B"; 
         if (isCurrent) {
-            fillColor = "#0F172A"; // Preto (Atual)
+            fillColor = "#0F172A"; 
             scale = 2.2;
         }
     }
@@ -55,7 +55,8 @@ export default function MapView({
     setAllStatus,
     isReordering, 
     reorderList, 
-    onMarkerClick 
+    onMarkerClick,
+    onStartReorder
 }) {
     const [selectedMarker, setSelectedMarker] = useState(null);
     const [mapInstance, setMapInstance] = useState(null);
@@ -170,23 +171,11 @@ export default function MapView({
                                         
                                         {item.status === 'pending' ? (
                                             <div className="flex gap-1">
-                                                <button 
-                                                    onClick={() => setStatus(item.id, 'failed')}
-                                                    className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"
-                                                >
-                                                    <AlertCircle size={10}/> Ocorrência
-                                                </button>
-                                                <button 
-                                                    onClick={() => setStatus(item.id, 'success')}
-                                                    className="flex-1 bg-green-500 text-white py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm"
-                                                >
-                                                    <CheckCircle size={10}/> Entregue
-                                                </button>
+                                                <button onClick={() => setStatus(item.id, 'failed')} className="flex-1 bg-white border border-red-200 text-red-500 py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1"><XCircle size={10}/> Ocorrência</button>
+                                                <button onClick={() => setStatus(item.id, 'success')} className="flex-1 bg-green-500 text-white py-1 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm"><CheckCircle size={10}/> Entregue</button>
                                             </div>
                                         ) : (
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded w-full block text-center ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
-                                                {item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}
-                                            </span>
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded w-full block text-center ${item.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{item.status === 'success' ? 'ENTREGUE' : 'OCORRÊNCIA'}</span>
                                         )}
                                     </div>
                                 ))}
@@ -199,6 +188,18 @@ export default function MapView({
                     </InfoWindowF>
                 )}
             </GoogleMap>
+
+            {/* ITEM 3: BOTÃO EDITAR NO TOPO DIREITO DO MAPA */}
+            {!isReordering && (
+                <div className="absolute top-4 right-4 z-50">
+                    <button 
+                        onClick={onStartReorder}
+                        className="bg-white text-slate-700 p-3 rounded-full shadow-lg border border-slate-200 flex items-center justify-center active:scale-95 transition"
+                    >
+                        <Edit3 size={20} />
+                    </button>
+                </div>
+            )}
         </div>
     );
 }
