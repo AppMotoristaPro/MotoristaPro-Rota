@@ -6,14 +6,13 @@ import subprocess
 # --- CONFIGURAÇÕES ---
 BACKUP_DIR = "backup"
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"hotfix_v41_{TIMESTAMP}")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"restore_v44_{TIMESTAMP}")
 
 # CHAVE API
 API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
 
-# --- CONTEÚDO DO APP.JSX (CORRIGIDO) ---
+# --- CONTEÚDO DO APP.JSX (V43 Restaurada + Fix LayoutDashboard + Sem Gráfico) ---
 APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
-// FIX: Adicionado LayoutDashboard aos imports
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
   Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, AlertCircle, Fuel, Timer, Calculator, Save, CheckCircle
@@ -22,7 +21,6 @@ import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
@@ -81,15 +79,14 @@ const groupStopsByStopName = (stops) => {
         if (!seen.has(key)) {
             const g = groups[key];
             if (g) {
-                // Lógica de Status: Prioridade ao Pendente
                 const t = g.items.length;
                 const s = g.items.filter(i => i.status === 'success').length;
                 const f = g.items.filter(i => i.status === 'failed').length;
                 
                 if (s === t) g.status = 'success';
                 else if (f === t) g.status = 'failed';
-                else if (s + f === t) g.status = 'partial'; // Todos finalizados, mas misto
-                else g.status = 'pending'; // AINDA TEM PENDENTE
+                else if (s + f === t) g.status = 'partial';
+                else g.status = 'pending';
 
                 ordered.push(g);
                 seen.add(key);
@@ -111,12 +108,41 @@ const calculateProgressPercent = (stops) => {
     return Math.round((done / stops.length) * 100);
 };
 
-// Helper de Data para Semana
-const getStartOfWeek = (date) => {
-  const d = new Date(date);
-  const day = d.getDay(); // 0 = Domingo
-  const diff = d.getDate() - day; 
-  return new Date(d.setDate(diff));
+// --- HELPERS DE DATA E HORA (V43) ---
+const timeToDecimal = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return 0;
+    return h + (m / 60);
+};
+
+const getDateRangeFromWeek = (weekString) => {
+    if (!weekString) return { start: new Date(), end: new Date() };
+    const [yearStr, weekStr] = weekString.split('-W');
+    const year = parseInt(yearStr);
+    const week = parseInt(weekStr);
+
+    const simple = new Date(year, 0, 1 + (week - 1) * 7);
+    const dow = simple.getDay();
+    const ISOweekStart = simple;
+    if (dow <= 4)
+        ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+    else
+        ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+    
+    const start = new Date(ISOweekStart);
+    start.setDate(start.getDate() - 1); 
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6); 
+
+    return { start, end };
+};
+
+const formatWeekRange = (weekString) => {
+    if (!weekString) return "";
+    const { start, end } = getDateRangeFromWeek(weekString);
+    const fmt = d => d.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+    return `${fmt(start)} até ${fmt(end)}`;
 };
 
 export default function App() {
@@ -129,12 +155,12 @@ export default function App() {
   const [newRouteDate, setNewRouteDate] = useState(new Date().toISOString().split('T')[0]);
   const [newRouteValue, setNewRouteValue] = useState('');
 
-  // Filtro
   const [dashFilterType, setDashFilterType] = useState('month'); 
-  const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7));
+  const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7)); 
+  const [dashFilterWeek, setDashFilterWeek] = useState('');
 
   const [showFinishModal, setShowFinishModal] = useState(false);
-  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '', fuel: '' });
+  const [finishData, setFinishData] = useState({ km: '', hours: '', fuel: '' });
 
   const [tempStops, setTempStops] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
@@ -144,7 +170,6 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMap, setShowMap] = useState(false);
   const [directionsResponse, setDirectionsResponse] = useState(null);
-  
   const [realMetrics, setRealMetrics] = useState({ dist: '0 km', time: '0 min' });
 
   const [isReordering, setIsReordering] = useState(false);
@@ -152,7 +177,7 @@ export default function App() {
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
-  // DASHBOARD
+  // --- DASHBOARD CALCULATION ---
   const dashboardStats = useMemo(() => {
       let filtered = [...routes];
       
@@ -160,38 +185,32 @@ export default function App() {
           filtered = routes.filter(r => r.date.startsWith(dashFilterValue));
       } else if (dashFilterType === 'day' && dashFilterValue) {
           filtered = routes.filter(r => r.date === dashFilterValue);
-      } else if (dashFilterType === 'week') {
-           const now = new Date();
-           const startOfWeek = getStartOfWeek(now);
-           const endOfWeek = new Date(startOfWeek);
-           endOfWeek.setDate(endOfWeek.getDate() + 6);
+      } else if (dashFilterType === 'week' && dashFilterWeek) {
+           const { start, end } = getDateRangeFromWeek(dashFilterWeek);
+           start.setHours(0,0,0,0);
+           end.setHours(23,59,59,999);
            
            filtered = routes.filter(r => {
-               const rd = new Date(r.date);
-               return rd >= startOfWeek && rd <= endOfWeek;
+               const rd = new Date(r.date + 'T00:00:00');
+               return rd >= start && rd <= end;
            });
       }
 
-      filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
-
       let totalRevenue = 0;
-      let totalExpenses = 0;
+      let totalFuel = 0;
       let totalKmDriven = 0;
       let totalHours = 0;
       let totalSuccess = 0;
       let totalStops = 0;
 
-      const graphData = filtered.map(r => {
+      filtered.forEach(r => {
           const val = parseFloat(r.value || 0);
-          const exp = parseFloat(r.expenses || 0);
           const fuel = parseFloat(r.fuel || 0);
           const km = parseFloat(r.realKm || 0);
           const hrs = parseFloat(r.hours || 0);
           
-          const totalCost = exp + fuel;
-
           totalRevenue += val;
-          totalExpenses += totalCost;
+          totalFuel += fuel;
           totalKmDriven += km;
           totalHours += hrs;
 
@@ -199,35 +218,32 @@ export default function App() {
               totalStops += r.stops.length;
               totalSuccess += r.stops.filter(s => s.status === 'success').length;
           }
-
-          return {
-              date: new Date(r.date).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}),
-              faturamento: val,
-              lucro: val - totalCost
-          };
       });
-
-      const netProfit = totalRevenue - totalExpenses;
-      const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0;
+      
+      const netProfit = totalRevenue - totalFuel;
       const earningsPerKm = totalKmDriven > 0 ? (totalRevenue / totalKmDriven).toFixed(2) : "0.00";
       const earningsPerHour = totalHours > 0 ? (totalRevenue / totalHours).toFixed(2) : "0.00";
+      const earningsPerPackage = totalStops > 0 ? (totalRevenue / totalStops).toFixed(2) : "0.00";
       const avgRoute = filtered.length > 0 ? (totalRevenue / filtered.length).toFixed(2) : "0.00";
       const successRate = totalStops > 0 ? Math.round((totalSuccess / totalStops) * 100) : 0;
 
       return {
           totalRevenue: totalRevenue.toFixed(2),
-          totalExpenses: totalExpenses.toFixed(2),
+          totalFuel: totalFuel.toFixed(2),
           netProfit: netProfit.toFixed(2),
-          profitMargin,
+          
+          totalKmDriven: totalKmDriven.toFixed(1),
+          totalHours: totalHours.toFixed(1),       
+
           earningsPerKm,
           earningsPerHour,
+          earningsPerPackage,
           avgRoute,
           successRate,
           totalSuccess,
-          graphData,
           count: filtered.length
       };
-  }, [routes, dashFilterType, dashFilterValue]);
+  }, [routes, dashFilterType, dashFilterValue, dashFilterWeek]);
 
   useEffect(() => {
     try {
@@ -328,7 +344,7 @@ export default function App() {
           value: newRouteValue, 
           stops: tempStops, 
           optimized: true,
-          expenses: 0, 
+          expenses: 0, // Campo legado zerado
           fuel: 0,
           realKm: 0,   
           hours: 0     
@@ -370,8 +386,7 @@ export default function App() {
       if (r) {
           setFinishData({
               km: r.realKm || '',
-              hours: r.hours || '',
-              expenses: r.expenses || '',
+              hours: '', // Sempre limpo
               fuel: r.fuel || ''
           });
       }
@@ -381,12 +396,13 @@ export default function App() {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
 
+      const hoursDecimal = timeToDecimal(finishData.hours);
+
       const updated = [...routes];
       updated[rIdx] = {
           ...updated[rIdx],
           realKm: finishData.km,
-          hours: finishData.hours,
-          expenses: finishData.expenses,
+          hours: hoursDecimal, 
           fuel: finishData.fuel,
           isFinished: true 
       };
@@ -422,7 +438,7 @@ export default function App() {
   };
 
   const startReorderMode = () => {
-      handleToggleMap(); 
+      if (!showMap) setShowMap(true); 
       setIsReordering(true);
       setReorderList([]); 
       showToast("Toque nos pinos na ordem desejada!", "info");
@@ -519,8 +535,7 @@ export default function App() {
 
   const activeRoute = routes.find(r => r.id === activeRouteId);
   const groupedStops = useMemo(() => activeRoute ? groupStopsByStopName(activeRoute.stops) : [], [activeRoute, routes]);
-  const nextGroup = groupedStops.find(g => g.status === 'pending'); // Próximo grupo pendente
-  
+  const nextGroup = groupedStops.find(g => g.status === 'pending');
   const isRouteComplete = activeRoute && !nextGroup;
 
   useEffect(() => {
@@ -580,7 +595,11 @@ export default function App() {
                       <input type="date" className="w-full bg-slate-100 p-3 rounded-xl text-center font-bold text-slate-700 outline-none border border-slate-200" value={dashFilterValue} onChange={e => setDashFilterValue(e.target.value)} />
                   )}
                   {dashFilterType === 'week' && (
-                      <div className="bg-blue-50 text-blue-700 p-3 rounded-xl text-center font-bold text-xs border border-blue-100">Mostrando últimos 7 dias</div>
+                      <div>
+                        <input type="week" className="w-full bg-slate-100 p-3 rounded-xl text-center font-bold text-slate-700 outline-none border border-slate-200" value={dashFilterWeek} onChange={e => setDashFilterWeek(e.target.value)} />
+                        {/* ITEM 1: RANGE DA SEMANA */}
+                        <div className="text-center text-[10px] text-slate-400 font-bold mt-2 uppercase tracking-widest">{formatWeekRange(dashFilterWeek)}</div>
+                      </div>
                   )}
               </div>
           </div>
@@ -593,8 +612,18 @@ export default function App() {
                       <div className="text-4xl font-extrabold tracking-tight">R$ {dashboardStats.netProfit}</div>
                       <div className="flex justify-between mt-4 pt-4 border-t border-slate-700 text-xs opacity-60">
                           <span>Receita: {dashboardStats.totalRevenue}</span>
-                          <span>Despesa: {dashboardStats.totalExpenses}</span>
+                          <span>Combustível: {dashboardStats.totalFuel}</span>
                       </div>
+                  </div>
+
+                  {/* ITEM 7: NOVOS CARDS */}
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Clock size={16}/><span className="text-[10px] font-bold uppercase">Horas Totais</span></div>
+                      <div className="text-xl font-bold text-slate-800">{dashboardStats.totalHours} h</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                      <div className="flex items-center gap-2 text-slate-400 mb-2"><MapIcon size={16}/><span className="text-[10px] font-bold uppercase">Km Totais</span></div>
+                      <div className="text-xl font-bold text-slate-800">{dashboardStats.totalKmDriven} km</div>
                   </div>
 
                   <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
@@ -607,32 +636,13 @@ export default function App() {
                   </div>
                   
                   <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Check size={16}/><span className="text-[10px] font-bold uppercase">Entregues</span></div>
-                      <div className="text-xl font-bold text-slate-800">{dashboardStats.totalSuccess}</div>
+                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Package size={16}/><span className="text-[10px] font-bold uppercase">Pacote Médio</span></div>
+                      <div className="text-xl font-bold text-slate-800">R$ {dashboardStats.earningsPerPackage}</div>
                   </div>
                   <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><TrendingUp size={16}/><span className="text-[10px] font-bold uppercase">Sucesso</span></div>
-                      <div className="text-xl font-bold text-slate-800">{dashboardStats.successRate}%</div>
+                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Briefcase size={16}/><span className="text-[10px] font-bold uppercase">Média / Rota</span></div>
+                      <div className="text-xl font-bold text-slate-800">R$ {dashboardStats.avgRoute}</div>
                   </div>
-              </div>
-
-              {dashboardStats.graphData.length > 0 && (
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-72">
-                      <h3 className="text-xs font-bold text-slate-400 mb-6 uppercase flex items-center gap-2"><LayoutDashboard size={14}/> Performance Recente</h3>
-                      <ResponsiveContainer width="100%" height="80%">
-                          <BarChart data={dashboardStats.graphData}>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0"/>
-                              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8'}} dy={10}/>
-                              <Tooltip cursor={{fill: '#F8FAFC'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}}/>
-                              <Bar name="Faturamento" dataKey="faturamento" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={12}/>
-                              <Bar name="Lucro Real" dataKey="lucro" fill="#10B981" radius={[4, 4, 0, 0]} barSize={12}/>
-                          </BarChart>
-                      </ResponsiveContainer>
-                  </div>
-              )}
-              
-              <div className="text-center text-xs text-slate-300 font-bold py-6 uppercase tracking-widest">
-                  {dashboardStats.count} Rotas Analisadas
               </div>
           </div>
       </div>
@@ -744,7 +754,7 @@ export default function App() {
                       
                       <div className="space-y-4 mb-8">
                           <div>
-                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">KM Final (Rodados)</label>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Km rodado</label>
                               <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
                                   <MapPin className="text-slate-400 mr-3" size={20}/>
                                   <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.km} onChange={e => setFinishData({...finishData, km: e.target.value})}/>
