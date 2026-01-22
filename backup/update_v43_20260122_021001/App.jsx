@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
-  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, TrendingUp, Briefcase, Fuel, Timer, Save, CheckCircle
+  Package, Clock, Box, Map as MapIcon, Loader2, Search, X, List, Check, RotateCcw, Undo2, Building, Calendar, Info, DollarSign, LayoutDashboard, TrendingUp, Briefcase, AlertCircle, Fuel, Timer, Calculator, Save, CheckCircle, TrendingDown, XCircle
 } from 'lucide-react';
 import { Geolocation } from '@capacitor/geolocation';
 import { useJsApiLoader } from '@react-google-maps/api';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+// MUDANÇA 3: Importando LineChart e Line
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 import MapView from './components/MapView';
 import RouteList from './components/RouteList';
@@ -94,18 +96,9 @@ const calculateProgressPercent = (stops) => {
     return Math.round((done / stops.length) * 100);
 };
 
-// --- NOVOS HELPERS DE DATA E HORA ---
-
-// Converte "HH:MM" para Decimal (ex: "01:30" -> 1.5)
-const timeToDecimal = (timeStr) => {
-    if (!timeStr) return 0;
-    const [h, m] = timeStr.split(':').map(Number);
-    if (isNaN(h) || isNaN(m)) return 0;
-    return h + (m / 60);
-};
-
-// Calcula inicio e fim da semana
+// Helper para calcular inicio e fim da semana baseada no input 'YYYY-Www'
 const getDateRangeFromWeek = (weekString) => {
+    // Ex: "2024-W05"
     if (!weekString) return { start: new Date(), end: new Date() };
     const [yearStr, weekStr] = weekString.split('-W');
     const year = parseInt(yearStr);
@@ -119,21 +112,13 @@ const getDateRangeFromWeek = (weekString) => {
     else
         ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
     
-    // Ajusta para Domingo a Sábado
+    // Ajusta para o domingo anterior (início da semana visual)
     const start = new Date(ISOweekStart);
-    start.setDate(start.getDate() - 1); 
+    start.setDate(start.getDate() - 1); // Domingo
     const end = new Date(start);
-    end.setDate(end.getDate() + 6); 
+    end.setDate(end.getDate() + 6); // Sábado
 
     return { start, end };
-};
-
-// Formata intervalo para exibição (Item 1)
-const formatWeekRange = (weekString) => {
-    if (!weekString) return "";
-    const { start, end } = getDateRangeFromWeek(weekString);
-    const fmt = d => d.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
-    return `${fmt(start)} até ${fmt(end)}`;
 };
 
 export default function App() {
@@ -148,12 +133,11 @@ export default function App() {
 
   // Filtros
   const [dashFilterType, setDashFilterType] = useState('month'); 
-  const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7)); 
-  const [dashFilterWeek, setDashFilterWeek] = useState('');
+  const [dashFilterValue, setDashFilterValue] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [dashFilterWeek, setDashFilterWeek] = useState(''); // YYYY-Www
 
   const [showFinishModal, setShowFinishModal] = useState(false);
-  // ITEM 5/6: Finish Data com formato de hora string
-  const [finishData, setFinishData] = useState({ km: '', hours: '', fuel: '' });
+  const [finishData, setFinishData] = useState({ km: '', hours: '', expenses: '', fuel: '' });
 
   const [tempStops, setTempStops] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
@@ -170,71 +154,96 @@ export default function App() {
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_KEY });
 
-  // DASHBOARD CALCULATION
+  // --- DASHBOARD INTELIGENTE V2 ---
   const dashboardStats = useMemo(() => {
       let filtered = [...routes];
       
+      // Filtros Lógicos
       if (dashFilterType === 'month' && dashFilterValue) {
           filtered = routes.filter(r => r.date.startsWith(dashFilterValue));
       } else if (dashFilterType === 'day' && dashFilterValue) {
           filtered = routes.filter(r => r.date === dashFilterValue);
       } else if (dashFilterType === 'week' && dashFilterWeek) {
+           // MUDANÇA 2: Filtro de Semana por Seleção
            const { start, end } = getDateRangeFromWeek(dashFilterWeek);
+           // Zera as horas para comparação justa
            start.setHours(0,0,0,0);
            end.setHours(23,59,59,999);
            
            filtered = routes.filter(r => {
-               const rd = new Date(r.date + 'T00:00:00');
+               const rd = new Date(r.date + 'T00:00:00'); // Força local time
                return rd >= start && rd <= end;
            });
       }
 
+      // Ordena cronologicamente
+      filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
+
       let totalRevenue = 0;
-      let totalFuel = 0;
+      let totalExpenses = 0;
       let totalKmDriven = 0;
       let totalHours = 0;
+      let totalPackages = 0;
       let totalSuccess = 0;
-      let totalStops = 0;
+      let totalFailed = 0;
+      let routeCount = filtered.length;
 
+      // Dados para o Gráfico de Linha (MUDANÇA 3)
+      const graphData = filtered.map(r => {
+          const val = parseFloat(r.value || 0);
+          const exp = parseFloat(r.expenses || 0) + parseFloat(r.fuel || 0);
+          
+          return {
+              date: new Date(r.date).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}),
+              faturamento: val
+          };
+      });
+
+      // Agregação de Dados (MUDANÇA 1)
       filtered.forEach(r => {
           const val = parseFloat(r.value || 0);
+          const exp = parseFloat(r.expenses || 0);
           const fuel = parseFloat(r.fuel || 0);
           const km = parseFloat(r.realKm || 0);
-          const hrs = parseFloat(r.hours || 0); // Já está em decimal
+          const hrs = parseFloat(r.hours || 0);
           
           totalRevenue += val;
-          totalFuel += fuel;
+          totalExpenses += (exp + fuel);
           totalKmDriven += km;
           totalHours += hrs;
 
           if (r.stops) {
-              totalStops += r.stops.length;
-              totalSuccess += r.stops.filter(s => s.status === 'success').length;
+              totalPackages += r.stops.length;
+              const s = r.stops.filter(stop => stop.status === 'success').length;
+              const f = r.stops.filter(stop => stop.status === 'failed').length;
+              totalSuccess += s;
+              totalFailed += f;
           }
       });
       
-      const netProfit = totalRevenue - totalFuel;
+      const netProfit = totalRevenue - totalExpenses;
       const earningsPerKm = totalKmDriven > 0 ? (totalRevenue / totalKmDriven).toFixed(2) : "0.00";
       const earningsPerHour = totalHours > 0 ? (totalRevenue / totalHours).toFixed(2) : "0.00";
-      const earningsPerPackage = totalStops > 0 ? (totalRevenue / totalStops).toFixed(2) : "0.00";
-      const avgRoute = filtered.length > 0 ? (totalRevenue / filtered.length).toFixed(2) : "0.00";
-      const successRate = totalStops > 0 ? Math.round((totalSuccess / totalStops) * 100) : 0;
+      const earningsPerPackage = totalPackages > 0 ? (totalRevenue / totalPackages).toFixed(2) : "0.00";
+      const avgRoute = routeCount > 0 ? (totalRevenue / routeCount).toFixed(2) : "0.00";
+      const successRate = totalPackages > 0 ? Math.round((totalSuccess / totalPackages) * 100) : 0;
 
       return {
           totalRevenue: totalRevenue.toFixed(2),
-          totalFuel: totalFuel.toFixed(2),
           netProfit: netProfit.toFixed(2),
+          totalExpenses: totalExpenses.toFixed(2),
           
-          totalKmDriven: totalKmDriven.toFixed(1), // ITEM 7
-          totalHours: totalHours.toFixed(1),       // ITEM 7
-
           earningsPerKm,
           earningsPerHour,
           earningsPerPackage,
           avgRoute,
+          
           successRate,
           totalSuccess,
-          count: filtered.length
+          totalFailed,
+          
+          graphData,
+          routeCount
       };
   }, [routes, dashFilterType, dashFilterValue, dashFilterWeek]);
 
@@ -337,6 +346,7 @@ export default function App() {
           value: newRouteValue, 
           stops: tempStops, 
           optimized: true,
+          expenses: 0, 
           fuel: 0,
           realKm: 0,   
           hours: 0     
@@ -375,28 +385,26 @@ export default function App() {
   const openFinishModal = () => {
       setShowFinishModal(true);
       const r = routes.find(ro => ro.id === activeRouteId);
-      // Carrega dados antigos ou vazios
-      // Se hours for decimal, não conseguimos voltar pra HH:MM facilmente, então reseta ou mantem se for string
-      // Para simplificar, sempre começa vazio ou mantem se for edição
-      setFinishData({
-          km: r?.realKm || '',
-          hours: '', // Sempre pede pra digitar de novo no formato HH:MM
-          fuel: r?.fuel || ''
-      });
+      if (r) {
+          setFinishData({
+              km: r.realKm || '',
+              hours: r.hours || '',
+              expenses: r.expenses || '',
+              fuel: r.fuel || ''
+          });
+      }
   };
 
-  // ITEM 5: CONVERTE HORAS PARA DECIMAL AO SALVAR
   const saveFinishData = () => {
       const rIdx = routes.findIndex(r => r.id === activeRouteId);
       if (rIdx === -1) return;
-
-      const hoursDecimal = timeToDecimal(finishData.hours);
 
       const updated = [...routes];
       updated[rIdx] = {
           ...updated[rIdx],
           realKm: finishData.km,
-          hours: hoursDecimal, // Salva como número (1.5)
+          hours: finishData.hours,
+          expenses: finishData.expenses,
           fuel: finishData.fuel,
           isFinished: true 
       };
@@ -431,9 +439,8 @@ export default function App() {
       }
   };
 
-  // ITEM 2: FORÇA ABRIR O MAPA
   const startReorderMode = () => {
-      setShowMap(true); // Força true, sem toggle
+      handleToggleMap(); 
       setIsReordering(true);
       setReorderList([]); 
       showToast("Toque nos pinos na ordem desejada!", "info");
@@ -565,7 +572,7 @@ export default function App() {
       }
   }, [nextGroup?.id, userPos, isLoaded]);
 
-  // --- DASHBOARD VIEW ---
+  // --- DASHBOARD VIEW (V42) ---
   if (view === 'dashboard') return (
       <div className="min-h-screen bg-slate-50 flex flex-col pt-safe">
           <div className="bg-white p-6 shadow-sm z-10 sticky top-0">
@@ -575,6 +582,7 @@ export default function App() {
                 <div className="w-8"></div>
               </div>
               
+              {/* FILTROS */}
               <div className="segmented-control mb-4">
                   <div className={`segmented-option ${dashFilterType==='all'?'active':''}`} onClick={() => setDashFilterType('all')}>Geral</div>
                   <div className={`segmented-option ${dashFilterType==='month'?'active':''}`} onClick={() => {setDashFilterType('month'); setDashFilterValue(new Date().toISOString().slice(0, 7))}}>Mês</div>
@@ -590,55 +598,92 @@ export default function App() {
                       <input type="date" className="w-full bg-slate-100 p-3 rounded-xl text-center font-bold text-slate-700 outline-none border border-slate-200" value={dashFilterValue} onChange={e => setDashFilterValue(e.target.value)} />
                   )}
                   {dashFilterType === 'week' && (
-                      <div>
-                        <input type="week" className="w-full bg-slate-100 p-3 rounded-xl text-center font-bold text-slate-700 outline-none border border-slate-200" value={dashFilterWeek} onChange={e => setDashFilterWeek(e.target.value)} />
-                        {/* ITEM 1: MOSTRAR RANGE DE DATA */}
-                        <div className="text-center text-[10px] text-slate-400 font-bold mt-2 uppercase tracking-widest">{formatWeekRange(dashFilterWeek)}</div>
-                      </div>
+                      // MUDANÇA 2: Input Week Real
+                      <input type="week" className="w-full bg-slate-100 p-3 rounded-xl text-center font-bold text-slate-700 outline-none border border-slate-200" value={dashFilterWeek} onChange={e => setDashFilterWeek(e.target.value)} />
                   )}
               </div>
           </div>
 
-          <div className="flex-1 p-6 space-y-4 overflow-y-auto">
+          <div className="flex-1 p-6 space-y-5 overflow-y-auto">
               
-              <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-900 p-5 rounded-2xl shadow-xl text-white col-span-2">
-                      <div className="flex items-center gap-2 opacity-80 mb-2"><DollarSign size={16}/><span className="text-xs font-bold uppercase tracking-wider">Lucro Líquido</span></div>
-                      <div className="text-4xl font-extrabold tracking-tight">R$ {dashboardStats.netProfit}</div>
-                      <div className="flex justify-between mt-4 pt-4 border-t border-slate-700 text-xs opacity-60">
-                          <span>Receita: {dashboardStats.totalRevenue}</span>
-                          <span>Combustível: {dashboardStats.totalFuel}</span>
+              {/* GRUPO 1: FINANCEIRO MACRO */}
+              <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-blue-600 p-4 rounded-2xl shadow-lg text-white col-span-2">
+                      <div className="flex justify-between items-start">
+                          <div>
+                              <div className="flex items-center gap-1 opacity-80 mb-1 text-[10px] uppercase font-bold tracking-wider">Faturamento Bruto</div>
+                              <div className="text-3xl font-extrabold tracking-tight">R$ {dashboardStats.totalRevenue}</div>
+                          </div>
+                          <DollarSign className="opacity-20" size={32}/>
                       </div>
                   </div>
-
-                  {/* ITEM 7: NOVOS CARDS TOTAIS */}
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Clock size={16}/><span className="text-[10px] font-bold uppercase">Horas Totais</span></div>
-                      <div className="text-xl font-bold text-slate-800">{dashboardStats.totalHours} h</div>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><MapIcon size={16}/><span className="text-[10px] font-bold uppercase">Km Totais</span></div>
-                      <div className="text-xl font-bold text-slate-800">{dashboardStats.totalKmDriven} km</div>
-                  </div>
-
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><MapPin size={16}/><span className="text-[10px] font-bold uppercase">Ganho/Km</span></div>
-                      <div className="text-xl font-bold text-blue-600">R$ {dashboardStats.earningsPerKm}</div>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Clock size={16}/><span className="text-[10px] font-bold uppercase">Ganho/Hora</span></div>
-                      <div className="text-xl font-bold text-green-600">R$ {dashboardStats.earningsPerHour}</div>
-                  </div>
                   
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Package size={16}/><span className="text-[10px] font-bold uppercase">Pacote Médio</span></div>
-                      <div className="text-xl font-bold text-slate-800">R$ {dashboardStats.earningsPerPackage}</div>
+                  <div className="bg-green-100 p-4 rounded-2xl border border-green-200">
+                      <div className="text-[10px] text-green-700 font-bold uppercase mb-1">Lucro Líquido</div>
+                      <div className="text-xl font-bold text-green-800">R$ {dashboardStats.netProfit}</div>
                   </div>
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-2 text-slate-400 mb-2"><Briefcase size={16}/><span className="text-[10px] font-bold uppercase">Média / Rota</span></div>
-                      <div className="text-xl font-bold text-slate-800">R$ {dashboardStats.avgRoute}</div>
+                  <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
+                      <div className="text-[10px] text-red-600 font-bold uppercase mb-1">Despesas</div>
+                      <div className="text-xl font-bold text-red-700">R$ {dashboardStats.totalExpenses}</div>
                   </div>
               </div>
+
+              {/* MUDANÇA 3: GRÁFICO DE LINHA */}
+              {dashboardStats.graphData.length > 0 && (
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 h-64">
+                      <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase flex items-center gap-2"><TrendingUp size={12}/> Evolução Faturamento</h3>
+                      <ResponsiveContainer width="100%" height="85%">
+                          <LineChart data={dashboardStats.graphData}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0"/>
+                              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8'}} dy={10}/>
+                              <Tooltip cursor={{stroke: '#3B82F6', strokeWidth: 1}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}/>
+                              <Line type="monotone" dataKey="faturamento" stroke="#3B82F6" strokeWidth={3} dot={{r: 3, fill:'#3B82F6'}} activeDot={{r: 5}}/>
+                          </LineChart>
+                      </ResponsiveContainer>
+                  </div>
+              )}
+
+              {/* GRUPO 2: MÉDIAS E EFICIÊNCIA (MUDANÇA 1: NOVAS MÉTRICAS) */}
+              <h3 className="text-xs font-bold text-slate-400 uppercase ml-1 mt-2">Eficiência</h3>
+              <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Média / Km</span>
+                      <span className="text-base font-bold text-slate-700">R$ {dashboardStats.earningsPerKm}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Média / Hora</span>
+                      <span className="text-base font-bold text-slate-700">R$ {dashboardStats.earningsPerHour}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Média / Pacote</span>
+                      <span className="text-base font-bold text-slate-700">R$ {dashboardStats.earningsPerPackage}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Média / Rota</span>
+                      <span className="text-base font-bold text-slate-700">R$ {dashboardStats.avgRoute}</span>
+                  </div>
+              </div>
+
+              {/* GRUPO 3: OPERACIONAL */}
+              <h3 className="text-xs font-bold text-slate-400 uppercase ml-1 mt-2">Entregas</h3>
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="flex p-4 border-b border-slate-50 items-center justify-between">
+                      <span className="text-xs font-bold text-slate-500">Taxa de Sucesso</span>
+                      <span className={`text-lg font-bold ${dashboardStats.successRate >= 95 ? 'text-green-600' : 'text-amber-500'}`}>{dashboardStats.successRate}%</span>
+                  </div>
+                  <div className="grid grid-cols-2">
+                      <div className="p-4 border-r border-slate-50 text-center">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Entregues</span>
+                          <span className="text-xl font-bold text-slate-800">{dashboardStats.totalSuccess}</span>
+                      </div>
+                      <div className="p-4 text-center">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Não Entregues</span>
+                          <span className="text-xl font-bold text-red-500">{dashboardStats.totalFailed}</span>
+                      </div>
+                  </div>
+              </div>
+              
+              <div className="h-6"></div>
           </div>
       </div>
   );
@@ -737,7 +782,6 @@ export default function App() {
       <div className="flex flex-col h-screen bg-slate-50 relative">
           {toast && <div className={`fixed top-4 left-4 right-4 p-4 rounded-xl shadow-2xl z-50 text-white text-center font-bold text-sm toast-anim ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.msg}</div>}
           
-          {/* MODAL DE FINALIZAÇÃO ATUALIZADO (ITEM 4/5/6) */}
           {showFinishModal && (
               <div className="absolute inset-0 z-[3000] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
                   <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10">
@@ -750,7 +794,7 @@ export default function App() {
                       
                       <div className="space-y-4 mb-8">
                           <div>
-                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Km rodado</label>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">KM Final (Rodados)</label>
                               <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
                                   <MapPin className="text-slate-400 mr-3" size={20}/>
                                   <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.km} onChange={e => setFinishData({...finishData, km: e.target.value})}/>
@@ -760,20 +804,26 @@ export default function App() {
 
                           <div className="flex gap-4">
                               <div className="flex-1">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Horas trabalhadas</label>
+                                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Horas</label>
                                   <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
                                       <Timer className="text-slate-400 mr-2" size={20}/>
-                                      {/* ITEM 5: INPUT TIME */}
-                                      <input type="time" className="flex-1 outline-none text-lg font-bold bg-transparent" value={finishData.hours} onChange={e => setFinishData({...finishData, hours: e.target.value})}/>
+                                      <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.hours} onChange={e => setFinishData({...finishData, hours: e.target.value})}/>
                                   </div>
                               </div>
                               <div className="flex-1">
-                                  {/* ITEM 4: REMOVIDO GASTOS GENERICO */}
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Combustível</label>
+                                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Gastos (R$)</label>
                                   <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
-                                      <Fuel className="text-slate-400 mr-2" size={20}/>
-                                      <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.fuel} onChange={e => setFinishData({...finishData, fuel: e.target.value})}/>
+                                      <DollarSign className="text-slate-400 mr-2" size={20}/>
+                                      <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0" value={finishData.expenses} onChange={e => setFinishData({...finishData, expenses: e.target.value})}/>
                                   </div>
+                              </div>
+                          </div>
+                          
+                          <div>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Custo Gasolina (R$)</label>
+                              <div className="flex items-center bg-slate-50 p-4 rounded-2xl border border-slate-200 focus-within:border-green-500 transition">
+                                  <Fuel className="text-slate-400 mr-3" size={20}/>
+                                  <input type="number" className="flex-1 outline-none text-lg font-bold bg-transparent" placeholder="0 (Opcional)" value={finishData.fuel} onChange={e => setFinishData({...finishData, fuel: e.target.value})}/>
                               </div>
                           </div>
                       </div>
@@ -862,7 +912,6 @@ export default function App() {
                   expandedGroups={expandedGroups}
                   toggleGroup={toggleGroup}
                   setStatus={setStatus}
-                  onStartReorder={startReorderMode}
                   onEditAddress={updateAddress}
               />
           )}
