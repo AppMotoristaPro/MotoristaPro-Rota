@@ -1,4 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import os
+import shutil
+import datetime
+import subprocess
+
+# --- CONFIGURAÇÕES ---
+BACKUP_DIR = "backup"
+TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CURRENT_BACKUP_PATH = os.path.join(BACKUP_DIR, f"hotfix_v41_{TIMESTAMP}")
+
+# CHAVE API
+API_KEY_VALUE = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU"
+
+# --- CONTEÚDO DO APP.JSX (CORRIGIDO) ---
+APP_JSX_CONTENT = """import React, { useState, useEffect, useMemo } from 'react';
 // FIX: Adicionado LayoutDashboard aos imports
 import { 
   Upload, Navigation, Trash2, Plus, ArrowLeft, MapPin, 
@@ -14,7 +28,7 @@ import MapView from './components/MapView';
 import RouteList from './components/RouteList';
 
 const DB_KEY = 'mp_db_v70_finance_pro';
-const GOOGLE_KEY = "AIzaSyB8bI2MpTKfQHBTZxyPphB18TPlZ4b3ndU";
+const GOOGLE_KEY = "__API_KEY__";
 
 const safeStr = (val) => {
     if (val === null || val === undefined) return '';
@@ -854,3 +868,38 @@ export default function App() {
       </div>
   );
 }
+"""
+
+FILES_TO_WRITE = {
+    "src/App.jsx": APP_JSX_CONTENT.replace("__API_KEY__", API_KEY_VALUE)
+}
+
+def write_files():
+    for path, content in FILES_TO_WRITE.items():
+        dir_name = os.path.dirname(path)
+        if dir_name and not os.path.exists(dir_name): os.makedirs(dir_name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"Escrevendo {path}")
+
+def main():
+    print(f"--- Iniciando V43 (Finance & Time) {TIMESTAMP} ---")
+    if not os.path.exists(BACKUP_DIR): os.makedirs(BACKUP_DIR)
+    os.makedirs(CURRENT_BACKUP_PATH)
+    
+    if os.path.exists("src/App.jsx"): shutil.copy2("src/App.jsx", CURRENT_BACKUP_PATH)
+
+    write_files()
+
+    print("--- Git Push ---")
+    subprocess.run("git add .", shell=True)
+    subprocess.run(f'git commit -m "Update V43: Dashboard Range, Time Input & Modal Fields - {TIMESTAMP}"', shell=True)
+    subprocess.run("git push", shell=True)
+    
+    os.remove(__file__)
+    print("Concluído.")
+
+if __name__ == "__main__":
+    main()
+
+
